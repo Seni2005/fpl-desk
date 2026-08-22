@@ -6,113 +6,161 @@
 <title>FPL Desk</title>
 <meta name="description" content="Personal Fantasy Premier League planner — squad, injuries, price movement, transfer targets and fixture difficulty.">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0c0f18">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
 <style>
 :root{
-  --ground:#eef1f7; --surface:#fff; --surface-2:#f6f8fc; --surface-3:#eceff6;
-  --line:#d8dee9; --line-soft:#e6eaf2;
-  --text:#151a26; --text-2:#4a5468; --text-3:#7c869c;
-  --accent:#3355d8; --accent-soft:#e5eaff; --accent-line:#b9c6f7;
-  --d2:#1f9d63; --d2bg:#d8f2e4; --d3:#7a8398; --d3bg:#e8ecf3;
-  --d4:#d1622a; --d4bg:#fbe3d6; --d5:#bc3535; --d5bg:#fadcda;
-  --up:#1f9d63; --upbg:#d8f2e4; --down:#bc3535; --downbg:#fadcda;
-  --warn:#b07a12; --warnbg:#fbeecd; --susp:#6b46c1; --suspbg:#eae2fb;
-  --shadow:0 1px 2px rgba(21,26,38,.06),0 8px 24px -12px rgba(21,26,38,.18);
+  --ground:#eaeef6; --surface:#fff; --surface-2:#f5f7fc; --surface-3:#e9edf6;
+  --line:#d6dde9; --line-soft:#e6eaf3;
+  --text:#141926; --text-2:#48536a; --text-3:#7b859d;
+  --accent:#3355d8; --accent-2:#5b78ec; --accent-soft:#e6ebff; --accent-line:#bac7f8;
+  --turf:#1d6b45; --turf-2:#22794e; --turf-line:rgba(255,255,255,.30);
+  --d2:#18885a; --d2bg:#d5f0e2; --d3:#78829a; --d3bg:#e7ebf3;
+  --d4:#cd5f28; --d4bg:#fbe2d4; --d5:#ba3232; --d5bg:#fadad8;
+  --up:#18885a; --upbg:#d5f0e2; --down:#ba3232; --downbg:#fadad8;
+  --warn:#a8730f; --warnbg:#fbedca; --susp:#6741ba; --suspbg:#e9e1fb;
+  --sh-1:0 1px 2px rgba(20,25,38,.05);
+  --sh-2:0 1px 2px rgba(20,25,38,.06),0 8px 22px -12px rgba(20,25,38,.20);
+  --sh-3:0 2px 4px rgba(20,25,38,.07),0 18px 44px -18px rgba(20,25,38,.30);
+  --r:12px;
+  --pad:20px;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --ground:#0c0f18; --surface:#141926; --surface-2:#1b2130; --surface-3:#222939;
-  --line:#2a3242; --line-soft:#222937;
-  --text:#eaeef7; --text-2:#a4aebf; --text-3:#727d92;
-  --accent:#8ea4ff; --accent-soft:#1e2742; --accent-line:#39457a;
-  --d2:#4dd493; --d2bg:#123227; --d3:#8994a8; --d3bg:#232a38;
-  --d4:#f08b4d; --d4bg:#3a2317; --d5:#f26a63; --d5bg:#3d1a1a;
-  --up:#4dd493; --upbg:#123227; --down:#f26a63; --downbg:#3d1a1a;
-  --warn:#e5b455; --warnbg:#3a2d12; --susp:#b39bf0; --suspbg:#282046;
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px -14px rgba(0,0,0,.7);
+  --ground:#0a0d15; --surface:#131824; --surface-2:#1a2030; --surface-3:#222a3c;
+  --line:#293145; --line-soft:#202737;
+  --text:#e9edf7; --text-2:#a2accd; --text-3:#6e7893;
+  --accent:#8ea4ff; --accent-2:#6f8bff; --accent-soft:#1c2440; --accent-line:#37426f;
+  --turf:#124430; --turf-2:#16523a; --turf-line:rgba(255,255,255,.16);
+  --d2:#43cf8d; --d2bg:#10301f; --d3:#828da5; --d3bg:#212939;
+  --d4:#ef8747; --d4bg:#39220f; --d5:#f0655e; --d5bg:#3b1818;
+  --up:#43cf8d; --upbg:#10301f; --down:#f0655e; --downbg:#3b1818;
+  --warn:#e3b152; --warnbg:#372a10; --susp:#b198f0; --suspbg:#251e44;
+  --sh-1:0 1px 2px rgba(0,0,0,.4);
+  --sh-2:0 1px 2px rgba(0,0,0,.4),0 10px 26px -14px rgba(0,0,0,.75);
+  --sh-3:0 2px 6px rgba(0,0,0,.5),0 20px 50px -20px rgba(0,0,0,.85);
 }}
 :root[data-theme="dark"]{
-  --ground:#0c0f18; --surface:#141926; --surface-2:#1b2130; --surface-3:#222939;
-  --line:#2a3242; --line-soft:#222937;
-  --text:#eaeef7; --text-2:#a4aebf; --text-3:#727d92;
-  --accent:#8ea4ff; --accent-soft:#1e2742; --accent-line:#39457a;
-  --d2:#4dd493; --d2bg:#123227; --d3:#8994a8; --d3bg:#232a38;
-  --d4:#f08b4d; --d4bg:#3a2317; --d5:#f26a63; --d5bg:#3d1a1a;
-  --up:#4dd493; --upbg:#123227; --down:#f26a63; --downbg:#3d1a1a;
-  --warn:#e5b455; --warnbg:#3a2d12; --susp:#b39bf0; --suspbg:#282046;
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px -14px rgba(0,0,0,.7);
+  --ground:#0a0d15; --surface:#131824; --surface-2:#1a2030; --surface-3:#222a3c;
+  --line:#293145; --line-soft:#202737;
+  --text:#e9edf7; --text-2:#a2accd; --text-3:#6e7893;
+  --accent:#8ea4ff; --accent-2:#6f8bff; --accent-soft:#1c2440; --accent-line:#37426f;
+  --turf:#124430; --turf-2:#16523a; --turf-line:rgba(255,255,255,.16);
+  --d2:#43cf8d; --d2bg:#10301f; --d3:#828da5; --d3bg:#212939;
+  --d4:#ef8747; --d4bg:#39220f; --d5:#f0655e; --d5bg:#3b1818;
+  --up:#43cf8d; --upbg:#10301f; --down:#f0655e; --downbg:#3b1818;
+  --warn:#e3b152; --warnbg:#372a10; --susp:#b198f0; --suspbg:#251e44;
+  --sh-1:0 1px 2px rgba(0,0,0,.4);
+  --sh-2:0 1px 2px rgba(0,0,0,.4),0 10px 26px -14px rgba(0,0,0,.75);
+  --sh-3:0 2px 6px rgba(0,0,0,.5),0 20px 50px -20px rgba(0,0,0,.85);
 }
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body{margin:0;padding:0 20px 80px;background:var(--ground);color:var(--text);
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;scroll-padding-top:72px}
+body{margin:0;padding:0 var(--pad) 90px;background:var(--ground);color:var(--text);
   font-family:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.55;
   -webkit-font-smoothing:antialiased}
-.wrap{max-width:1140px;margin:0 auto;display:flex;flex-direction:column;gap:30px}
-h1,h2,h3{font-family:Archivo,system-ui,sans-serif;margin:0;text-wrap:balance}
+.wrap{max-width:1160px;margin:0 auto;display:flex;flex-direction:column;gap:34px}
+h1,h2,h3,h4{font-family:Archivo,system-ui,sans-serif;margin:0;text-wrap:balance}
 .mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
-button{font:inherit;color:inherit;cursor:pointer}
-a{color:var(--accent)}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:5px}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:none}
+a{color:var(--accent);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+[hidden]{display:none!important}
 
-/* ---- header ---- */
-.desk{margin-top:28px;background:var(--surface);border:1px solid var(--line);border-radius:14px;
-  box-shadow:var(--shadow);overflow:hidden}
-.desk-top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:22px;padding:24px 26px 20px}
-.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;letter-spacing:.13em;
-  text-transform:uppercase;color:var(--text-3);display:block;margin-bottom:7px}
-h1{font-size:29px;font-weight:800;letter-spacing:-.02em;line-height:1.12}
-.sub{color:var(--text-2);font-size:13.5px;margin-top:6px}
+/* ---------- nav ---------- */
+nav{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--ground) 86%,transparent);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line-soft);
+  margin-inline:calc(var(--pad) * -1);padding-inline:var(--pad)}
+.navin{max-width:1160px;margin:0 auto;display:flex;align-items:center;gap:6px;height:54px;overflow-x:auto;scrollbar-width:none}
+.navin::-webkit-scrollbar{display:none}
+.brand{font-family:Archivo,sans-serif;font-weight:800;font-size:15px;letter-spacing:-.02em;
+  margin-right:12px;white-space:nowrap;display:flex;align-items:center;gap:7px}
+.brand i{width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0}
+nav a{font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--text-3);text-decoration:none;padding:6px 10px;border-radius:7px;white-space:nowrap;font-weight:600}
+nav a:hover{color:var(--text);background:var(--surface-2)}
+.themeBtn{margin-left:auto;flex-shrink:0;width:32px;height:32px;border-radius:8px;display:grid;place-items:center;
+  color:var(--text-3);border:1px solid var(--line-soft)}
+.themeBtn:hover{color:var(--text);background:var(--surface-2)}
+
+/* ---------- header ---------- */
+.desk{margin-top:26px;background:var(--surface);border:1px solid var(--line);border-radius:16px;
+  box-shadow:var(--sh-2);overflow:hidden}
+.desk-top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:22px;padding:26px 28px 22px;
+  background:linear-gradient(180deg,var(--accent-soft) 0%,transparent 100%)}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent);display:block;margin-bottom:8px}
+h1{font-size:31px;font-weight:800;letter-spacing:-.025em;line-height:1.1}
+.sub{color:var(--text-2);font-size:13.5px;margin-top:7px}
 .cd{text-align:right;flex-shrink:0}
-.cd-v{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;font-size:32px;
-  font-weight:600;letter-spacing:-.02em;color:var(--accent);line-height:1}
-.cd-l{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3);
-  margin-top:8px;font-family:"IBM Plex Mono",monospace}
-.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+.cd-v{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;font-size:34px;
+  font-weight:600;letter-spacing:-.03em;color:var(--accent);line-height:1}
+.cd-l{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin-top:8px;
+  font-family:"IBM Plex Mono",monospace}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
   border-top:1px solid var(--line-soft);background:var(--surface-2)}
-.cell{padding:13px 26px;border-right:1px solid var(--line-soft)}
+.cell{padding:14px 26px;border-right:1px solid var(--line-soft)}
 .cell:last-child{border-right:none}
-.ck{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);font-family:"IBM Plex Mono",monospace}
-.cv{font-size:15px;font-weight:600;margin-top:2px}
+.ck{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--text-3);font-family:"IBM Plex Mono",monospace}
+.cv{font-size:16px;font-weight:600;margin-top:3px;letter-spacing:-.01em}
 .cv small{font-weight:400;color:var(--text-2);font-size:12.5px}
 
-/* ---- sections ---- */
-section{display:flex;flex-direction:column;gap:13px}
+/* ---------- section furniture ---------- */
+section{display:flex;flex-direction:column;gap:14px;scroll-margin-top:70px}
 .sh{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap}
-h2{font-size:19px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:21px;font-weight:700;letter-spacing:-.022em}
 .note{font-size:12.5px;color:var(--text-3)}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
-.pad{padding:20px 22px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh-2)}
 
-/* ---- alerts ---- */
-.alerts{display:flex;flex-direction:column;gap:0}
-.alert{display:flex;gap:12px;align-items:flex-start;padding:13px 20px;border-bottom:1px solid var(--line-soft);font-size:13.5px;line-height:1.5}
+/* ---------- alerts ---------- */
+.alert{display:flex;gap:13px;align-items:flex-start;padding:13px 20px;border-bottom:1px solid var(--line-soft);
+  font-size:13.5px;line-height:1.5}
 .alert:last-child{border-bottom:none}
 .abar{flex-shrink:0;width:3px;align-self:stretch;border-radius:2px;min-height:20px}
 .abar.crit{background:var(--down)} .abar.warn{background:var(--warn)} .abar.good{background:var(--up)}
-.alert b{font-weight:600}
 .alert span{color:var(--text-2)}
 
-/* ---- squad ---- */
-.squad{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:10px;padding:18px}
-.pl{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:11px 12px;
-  display:flex;flex-direction:column;gap:6px;position:relative}
-.pl.flag{border-color:var(--down)}
-.pl-top{display:flex;align-items:baseline;gap:7px}
-.pl-n{font-weight:600;font-size:14px}
-.pl-p{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:12.5px;font-weight:600}
-.pl-m{display:flex;gap:9px;flex-wrap:wrap;font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--text-3)}
-.pl-m b{color:var(--text-2);font-weight:600}
-.pl-news{font-size:11.5px;color:var(--down);line-height:1.35}
-.cap{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:4px;background:var(--accent);
-  color:#fff;font-size:9.5px;font-weight:700;font-family:"IBM Plex Mono",monospace}
-:root[data-theme="dark"] .cap,:root:not([data-theme="light"]) .cap{color:#0c0f18}
-.pos-h{grid-column:1/-1;font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--text-3);margin-top:6px}
-.pos-h:first-child{margin-top:0}
+/* ---------- pitch ---------- */
+.pitch{position:relative;border-radius:var(--r) var(--r) 0 0;overflow:hidden;padding:22px 12px 16px;
+  background:
+    repeating-linear-gradient(180deg,var(--turf) 0 52px,var(--turf-2) 52px 104px);
+}
+.pitch::before{content:"";position:absolute;inset:10px 14px;border:2px solid var(--turf-line);border-radius:5px;pointer-events:none}
+.pitch::after{content:"";position:absolute;left:50%;top:10px;width:96px;height:48px;transform:translateX(-50%);
+  border:2px solid var(--turf-line);border-top:none;border-radius:0 0 60px 60px;pointer-events:none}
+.row{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;position:relative;z-index:1;margin-bottom:12px}
+.row:last-child{margin-bottom:0}
+.bench{background:var(--surface-2);border-top:1px solid var(--line);border-radius:0 0 var(--r) var(--r);padding:14px 12px 12px}
+.bench-l{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-3);text-align:center;margin-bottom:10px}
 
-/* ---- chips / badges ---- */
+.pp{width:96px;background:transparent;border:none;padding:0;display:flex;flex-direction:column;align-items:center;gap:0;
+  cursor:pointer;position:relative}
+.pp:hover .pp-n{background:var(--accent);color:#fff}
+:root[data-theme="dark"] .pp:hover .pp-n,:root:not([data-theme="light"]) .pp:hover .pp-n{color:#0a0d15}
+.pp svg{display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))}
+.pp-n{font-size:11.5px;font-weight:600;background:#fff;color:#141926;border-radius:4px 4px 0 0;
+  width:100%;padding:2px 4px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  margin-top:-3px;position:relative;z-index:2;transition:background .12s,color .12s}
+.pp-s{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;background:var(--accent);color:#fff;
+  border-radius:0 0 4px 4px;width:100%;padding:1px 4px;text-align:center}
+:root[data-theme="dark"] .pp-s,:root:not([data-theme="light"]) .pp-s{color:#0a0d15}
+.pp-badges{position:absolute;top:-3px;right:6px;display:flex;flex-direction:column;gap:2px;z-index:3}
+.arm{width:17px;height:17px;border-radius:50%;background:#141926;color:#fff;font-size:9px;font-weight:700;
+  display:grid;place-items:center;font-family:"IBM Plex Mono",monospace;border:1.5px solid #fff}
+.arm.v{background:#fff;color:#141926;border-color:#141926}
+.pin{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:700;
+  border:1.5px solid #fff;font-family:"IBM Plex Mono",monospace}
+.pin.out{background:var(--down);color:#fff} .pin.doubt{background:var(--warn);color:#fff}
+.pin.susp{background:var(--susp);color:#fff}
+.pin.up{background:var(--up);color:#fff} .pin.dn{background:var(--down);color:#fff}
+.formation{position:absolute;top:12px;right:20px;z-index:2;font-family:"IBM Plex Mono",monospace;font-size:11px;
+  font-weight:600;color:rgba(255,255,255,.85);letter-spacing:.08em}
+
+/* ---------- generic chips ---------- */
 .badge{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;
   letter-spacing:.04em;min-width:38px;text-align:center;padding:2px 5px;border-radius:5px;
   background:var(--surface-3);border:1px solid var(--line-soft);color:var(--text-2)}
@@ -121,33 +169,87 @@ h2{font-size:19px;font-weight:700;letter-spacing:-.01em}
 .t-out{background:var(--downbg);color:var(--down)} .t-doubt{background:var(--warnbg);color:var(--warn)}
 .t-susp{background:var(--suspbg);color:var(--susp)} .t-up{background:var(--upbg);color:var(--up)}
 .t-down{background:var(--downbg);color:var(--down)}
-.fx{display:inline-block;min-width:60px;padding:4px 6px;border-radius:6px;font-family:"IBM Plex Mono",monospace;
+.fx{display:inline-block;min-width:58px;padding:4px 6px;border-radius:6px;font-family:"IBM Plex Mono",monospace;
   font-size:11px;font-weight:600}
 .fx small{font-weight:500;opacity:.7;font-size:9.5px}
 .f2{background:var(--d2bg);color:var(--d2)} .f3{background:var(--d3bg);color:var(--d3)}
 .f4{background:var(--d4bg);color:var(--d4)} .f5{background:var(--d5bg);color:var(--d5)}
 
-/* ---- controls ---- */
+/* ---------- planner ---------- */
+.pl-head{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line-soft)}
+.pl-stat{display:flex;flex-direction:column;gap:1px;padding-right:16px;border-right:1px solid var(--line-soft)}
+.pl-stat:last-of-type{border-right:none}
+.pl-k{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--text-3)}
+.pl-v{font-family:"IBM Plex Mono",monospace;font-size:16px;font-weight:600;letter-spacing:-.02em}
+.pl-v.bad{color:var(--down)} .pl-v.good{color:var(--up)}
+.btn{border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:6px 12px;
+  font-size:12.5px;font-weight:600;color:var(--text-2)}
+.btn:hover{background:var(--surface-3);color:var(--text)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme="dark"] .btn.primary,:root:not([data-theme="light"]) .btn.primary{color:#0a0d15}
+.btn.primary:hover{background:var(--accent-2)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.plist{list-style:none;margin:0;padding:0}
+.plist li{display:flex;align-items:center;gap:10px;padding:8px 18px;border-bottom:1px solid var(--line-soft);font-size:13.5px}
+.plist li:last-child{border-bottom:none}
+.plist li.changed{background:var(--accent-soft)}
+.plist .pn{font-weight:600;cursor:pointer}
+.plist .pn:hover{color:var(--accent);text-decoration:underline}
+.plist .old{color:var(--text-3);text-decoration:line-through;font-size:12px;margin-left:6px}
+.plist .sp{margin-left:auto;display:flex;align-items:center;gap:10px}
+.pgrp{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-3);padding:10px 18px 5px;background:var(--surface-2);border-bottom:1px solid var(--line-soft)}
+.warnbox{padding:11px 18px;background:var(--warnbg);color:var(--warn);font-size:12.5px;font-weight:500;
+  border-bottom:1px solid var(--line-soft);display:flex;gap:8px;align-items:flex-start}
+
+/* ---------- shelves ---------- */
+.shelf{margin-bottom:4px}
+.shelf h3{font-size:13.5px;font-weight:700;margin-bottom:3px}
+.shelf p{margin:0 0 10px;font-size:12.5px;color:var(--text-3)}
+.rail{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scroll-snap-type:x proximity}
+.rail::-webkit-scrollbar{height:6px}
+.rail::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.pcard{flex:0 0 176px;scroll-snap-align:start;background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;padding:12px;text-align:left;box-shadow:var(--sh-1);transition:transform .12s,box-shadow .12s,border-color .12s}
+.pcard:hover{transform:translateY(-2px);box-shadow:var(--sh-2);border-color:var(--accent-line)}
+.pcard .top{display:flex;align-items:center;gap:7px;margin-bottom:7px}
+.pcard .nm{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pcard .why{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--accent);font-weight:600;margin-bottom:5px}
+.pcard .row2{display:flex;gap:8px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--text-3)}
+.pcard .row2 b{color:var(--text-2)}
+
+/* ---------- price watch ---------- */
+.pw{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:760px){.pw{grid-template-columns:1fr}}
+.pwcol h3{font-size:13px;font-weight:700;padding:13px 16px;border-bottom:1px solid var(--line-soft);
+  display:flex;align-items:center;gap:8px}
+.pwlist{margin:0;padding:0;list-style:none}
+.pwlist li{display:flex;align-items:center;gap:9px;padding:8px 16px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.pwlist li:last-child{border-bottom:none}
+.pwlist .n{font-weight:600;cursor:pointer}
+.pwlist .n:hover{color:var(--accent);text-decoration:underline}
+.pwlist .meta{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--text-3)}
+.meter{width:50px;height:5px;border-radius:3px;background:var(--surface-3);overflow:hidden;flex-shrink:0}
+.meter i{display:block;height:100%;border-radius:3px}
+
+/* ---------- controls + tables ---------- */
 .ctrl{display:flex;gap:9px;flex-wrap:wrap;align-items:center;padding:13px 16px;border-bottom:1px solid var(--line-soft)}
-.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:8px;padding:2px;gap:2px}
-.seg button{background:none;border:none;padding:5px 11px;border-radius:6px;font-size:12.5px;font-weight:500;
-  color:var(--text-2);font-family:"IBM Plex Mono",monospace;letter-spacing:.03em}
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:2px;gap:2px}
+.seg button{padding:5px 11px;border-radius:7px;font-size:12.5px;font-weight:600;color:var(--text-2);
+  font-family:"IBM Plex Mono",monospace;letter-spacing:.03em}
 .seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
 :root[data-theme="dark"] .seg button[aria-pressed="true"],
-:root:not([data-theme="light"]) .seg button[aria-pressed="true"]{color:#0c0f18}
+:root:not([data-theme="light"]) .seg button[aria-pressed="true"]{color:#0a0d15}
 input[type=search],input[type=number],select{background:var(--surface-2);border:1px solid var(--line);
   border-radius:8px;padding:6px 10px;font-size:13px;color:var(--text);font-family:inherit}
 input[type=search]{min-width:150px}
-input[type=range]{accent-color:var(--accent)}
 label.inline{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);
-  font-family:"IBM Plex Mono",monospace}
-
-/* ---- tables ---- */
+  font-family:"IBM Plex Mono",monospace;cursor:pointer}
 .scroll{overflow-x:auto}
 table{border-collapse:collapse;width:100%;font-size:13.5px}
 thead th{font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:600;letter-spacing:.09em;
   text-transform:uppercase;color:var(--text-3);text-align:right;padding:11px 9px;white-space:nowrap;
-  background:var(--surface-2);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:1}
+  background:var(--surface-2);border-bottom:1px solid var(--line)}
 thead th.l{text-align:left;padding-left:16px}
 thead th.s{cursor:pointer;user-select:none}
 thead th.s:hover{color:var(--text)}
@@ -157,37 +259,67 @@ tbody td.l{text-align:left;padding-left:16px}
 tbody td.c{text-align:center}
 tbody tr:last-child td{border-bottom:none}
 tbody tr:hover td{background:var(--surface-2)}
-.pname{font-weight:600}
+.pname{font-weight:600;cursor:pointer}
+tbody tr:hover .pname{color:var(--accent)}
 .psub{color:var(--text-3);font-size:11.5px;font-family:"IBM Plex Mono",monospace;margin-left:7px}
 .score{font-family:"IBM Plex Mono",monospace;font-weight:600}
 .bar{display:inline-block;height:4px;border-radius:2px;background:var(--accent);vertical-align:middle;margin-left:7px;min-width:2px}
 .dim{color:var(--text-3)}
 
-/* ---- price watch ---- */
-.pw{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media (max-width:720px){.pw{grid-template-columns:1fr}}
-.pwcol h3{font-size:13px;font-weight:700;padding:13px 16px;border-bottom:1px solid var(--line-soft);
-  display:flex;align-items:center;gap:8px}
-.pwlist{margin:0;padding:0;list-style:none}
-.pwlist li{display:flex;align-items:center;gap:9px;padding:8px 16px;border-bottom:1px solid var(--line-soft);font-size:13px}
-.pwlist li:last-child{border-bottom:none}
-.pwlist .n{font-weight:600}
-.pwlist .meta{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--text-3)}
-.meter{width:52px;height:5px;border-radius:3px;background:var(--surface-3);overflow:hidden;flex-shrink:0}
-.meter i{display:block;height:100%;border-radius:3px}
-
-/* ---- injuries ---- */
-.clubs{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:11px}
-.club{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:14px 15px;box-shadow:var(--shadow)}
+/* ---------- injuries ---------- */
+.clubs{display:grid;grid-template-columns:repeat(auto-fill,minmax(266px,1fr));gap:11px}
+.club{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:14px 15px;box-shadow:var(--sh-1)}
 .club-h{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line-soft)}
 .club-h b{font-family:Archivo,sans-serif;font-size:13px;font-weight:700}
 .club-h .n{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--text-3)}
 .ilist{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
 .ilist li{font-size:12.5px;line-height:1.4}
-.ilist .nm{font-weight:600}
+.ilist .nm{font-weight:600;cursor:pointer}
+.ilist .nm:hover{color:var(--accent);text-decoration:underline}
 .ilist .ds{color:var(--text-3);font-size:11.5px;display:block}
 
-/* ---- setup / empty ---- */
+/* ---------- drawer ---------- */
+.scrim{position:fixed;inset:0;background:rgba(10,13,21,.5);z-index:60;opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;height:100dvh;width:min(460px,100vw);background:var(--surface);
+  border-left:1px solid var(--line);box-shadow:var(--sh-3);z-index:61;transform:translateX(100%);
+  transition:transform .24s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}
+.drawer.on{transform:none}
+@media (prefers-reduced-motion:reduce){.drawer{transition:none}.scrim{transition:none}}
+.dh{padding:20px 22px 16px;border-bottom:1px solid var(--line-soft);display:flex;gap:14px;align-items:flex-start}
+.dh h3{font-size:20px;font-weight:800;letter-spacing:-.02em}
+.dh .meta{font-size:12.5px;color:var(--text-3);margin-top:3px;font-family:"IBM Plex Mono",monospace}
+.dclose{margin-left:auto;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;
+  color:var(--text-3);border:1px solid var(--line-soft);flex-shrink:0}
+.dclose:hover{background:var(--surface-2);color:var(--text)}
+.dbody{overflow-y:auto;padding:18px 22px 40px;display:flex;flex-direction:column;gap:20px}
+.dblock h4{font-size:11px;font-family:"IBM Plex Mono",monospace;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-3);margin-bottom:10px;font-weight:600}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line-soft);border:1px solid var(--line-soft);
+  border-radius:9px;overflow:hidden}
+.kv div{background:var(--surface);padding:9px 11px}
+.kv .k{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3)}
+.kv .v{font-family:"IBM Plex Mono",monospace;font-size:14px;font-weight:600;margin-top:2px}
+.newsbox{background:var(--downbg);color:var(--down);padding:11px 13px;border-radius:9px;font-size:12.5px;font-weight:500}
+.fxlist{display:flex;gap:6px;flex-wrap:wrap}
+.seasons{width:100%}
+.seasons td{padding:5px 0;font-size:12.5px;border:none}
+.seasons td:first-child{font-family:"IBM Plex Mono",monospace;color:var(--text-3);width:64px}
+.seasons td:last-child{text-align:right;font-family:"IBM Plex Mono",monospace;font-weight:600;width:44px}
+.chart{width:100%;overflow:visible;display:block}
+.chart .axis{stroke:var(--line);stroke-width:1}
+/* note: class is cbar, NOT bar — .bar is the score meter in the targets table
+   and its CSS height would override the rect geometry here. */
+.chart .cbar{fill:var(--accent);transition:opacity .12s}
+.chart .cbar:hover{opacity:.72}
+.chart .lbl{font-family:"IBM Plex Mono",monospace;font-size:9px;fill:var(--text-3)}
+.chart .val{font-family:"IBM Plex Mono",monospace;font-size:9.5px;fill:var(--text-2);font-weight:600}
+.tip{position:fixed;z-index:70;background:var(--text);color:var(--ground);font-family:"IBM Plex Mono",monospace;
+  font-size:11px;padding:5px 8px;border-radius:6px;pointer-events:none;opacity:0;transition:opacity .1s;white-space:nowrap}
+.tip.on{opacity:1}
+.empty-note{color:var(--text-3);font-size:12.5px;font-style:normal}
+
+/* ---------- setup ---------- */
 .setup{padding:26px}
 .setup h3{font-size:16px;font-weight:700;margin-bottom:7px}
 .setup p{margin:0 0 13px;color:var(--text-2);font-size:14px;max-width:62ch}
@@ -197,21 +329,51 @@ tbody tr:hover td{background:var(--surface-2)}
   font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;display:grid;place-items:center;margin-top:1px}
 code{font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(--surface-2);
   border:1px solid var(--line-soft);border-radius:5px;padding:1px 5px}
-
 .load{padding:50px 26px;text-align:center;color:var(--text-3);font-family:"IBM Plex Mono",monospace;font-size:13px}
-details.how{margin-top:2px}
 details.how summary{cursor:pointer;font-size:12.5px;color:var(--text-3);font-family:"IBM Plex Mono",monospace;padding:2px 0}
 details.how div{font-size:13px;color:var(--text-2);padding:10px 0 2px;max-width:70ch;line-height:1.6}
-footer{border-top:1px solid var(--line);padding-top:17px;font-size:12px;color:var(--text-3);
+footer{border-top:1px solid var(--line);padding-top:18px;font-size:12px;color:var(--text-3);
   display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+/* Planner rows carry a lot of metadata; below tablet the meta drops onto its
+   own line and only the next fixture stays visible. */
+@media (max-width:700px){
+  .plist li{flex-wrap:wrap}
+  .plist .sp{width:100%;margin-left:0;justify-content:flex-end;margin-top:5px}
+  .fxs .fx:nth-child(n+2){display:none}
+}
 @media (max-width:640px){
-  h1{font-size:24px} .cd-v{font-size:26px} .desk-top{padding:20px 18px 16px}
-  .cell{padding:12px 18px} body{padding:0 13px 60px} .pad{padding:16px}
+  :root{--pad:13px}
+  h1{font-size:25px} .cd-v{font-size:27px} .desk-top{padding:20px 18px 16px}
+  .cell{padding:12px 18px} body{padding-bottom:70px}
+  .pp{width:70px} .pp-n{font-size:10.5px} .row{gap:4px}
+  .kv{grid-template-columns:repeat(2,1fr)}
+  .pitch{padding:18px 6px 12px}
+}
+@media (max-width:430px){
+  .pp{width:62px} .pp-n{font-size:9.5px} .pp-s{font-size:9.5px}
+  .row{gap:3px} .pitch{padding:16px 4px 10px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
+
+<nav>
+  <div class="navin">
+    <span class="brand"><i></i>FPL Desk</span>
+    <a href="#squad">Squad</a>
+    <a href="#planner">Planner</a>
+    <a href="#picks">Worth a look</a>
+    <a href="#prices">Prices</a>
+    <a href="#targets">Targets</a>
+    <a href="#fixtures">Fixtures</a>
+    <a href="#news">News</a>
+    <button class="themeBtn" id="themeBtn" aria-label="Switch theme" title="Switch theme">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+  </div>
+</nav>
+
 <div class="wrap">
 
   <div class="desk">
@@ -231,26 +393,50 @@ footer{border-top:1px solid var(--line);padding-top:17px;font-size:12px;color:va
 
   <section id="alertSec" hidden>
     <div class="sh"><h2>Needs your attention</h2><div class="note" id="alertNote"></div></div>
-    <div class="card alerts" id="alerts"></div>
+    <div class="card" id="alerts"></div>
   </section>
 
-  <section id="squadSec">
+  <section id="squad">
     <div class="sh"><h2>Your squad</h2><div class="note" id="squadNote"></div></div>
-    <div class="card" id="squad"><div class="load">Loading&hellip;</div></div>
+    <div class="card" id="squadCard"><div class="load">Loading&hellip;</div></div>
   </section>
 
-  <section id="priceSec" hidden>
+  <section id="planner" hidden>
     <div class="sh">
-      <h2>Price watch</h2>
-      <div class="note">Estimated from net transfers against ownership &mdash; a guide, not a guarantee</div>
+      <h2>Planner</h2>
+      <div class="note">Try transfers against your real budget before you commit them</div>
     </div>
+    <div class="card">
+      <div class="pl-head" id="plHead"></div>
+      <div id="plWarn"></div>
+      <ul class="plist" id="plList"></ul>
+    </div>
+    <details class="how">
+      <summary>How the budget is worked out</summary>
+      <div>
+        FPL sells a player back to you at your purchase price plus half of any rise since, rounded down &mdash; so a
+        player who has gone up £0.3m is sold at £0.1m profit, not £0.3m. The API does not expose purchase prices without
+        logging in, so this planner values your existing players at <b>today's market price</b>. For players you have
+        held since the start that is exact; for one who has risen since you bought them it can be optimistic by a tenth
+        or two. Treat a plan that is within £0.2m of your budget as needing a check on the real site.
+      </div>
+    </details>
+  </section>
+
+  <section id="picks" hidden>
+    <div class="sh"><h2>Worth a look</h2><div class="note">Shortlists built from the numbers &mdash; your judgement still applies</div></div>
+    <div id="shelves"></div>
+  </section>
+
+  <section id="prices" hidden>
+    <div class="sh"><h2>Price watch</h2><div class="note">Estimated from net transfers against ownership &mdash; a guide, not a guarantee</div></div>
     <div class="pw">
       <div class="card pwcol"><h3><span class="tag t-up">rising</span> Closing on a rise</h3><ul class="pwlist" id="rising"></ul></div>
       <div class="card pwcol"><h3><span class="tag t-down">falling</span> Closing on a fall</h3><ul class="pwlist" id="falling"></ul></div>
     </div>
   </section>
 
-  <section id="targetSec" hidden>
+  <section id="targets" hidden>
     <div class="sh"><h2>Transfer targets</h2><div class="note" id="targetNote"></div></div>
     <div class="card">
       <div class="ctrl">
@@ -263,7 +449,6 @@ footer{border-top:1px solid var(--line);padding-top:17px;font-size:12px;color:va
         </div>
         <input type="search" id="search" placeholder="Search player or club" aria-label="Search players">
         <label class="inline">max £<input type="number" id="maxPrice" min="3.8" max="16" step="0.1" value="16" style="width:66px"></label>
-        <label class="inline"><input type="checkbox" id="fitOnly"> fits my budget</label>
         <label class="inline"><input type="checkbox" id="hideFlag" checked> hide flagged</label>
         <label class="inline"><input type="checkbox" id="hideOwned"> hide my players</label>
       </div>
@@ -281,17 +466,14 @@ footer{border-top:1px solid var(--line);padding-top:17px;font-size:12px;color:va
             <th class="s" data-k="owned">Own%</th>
             <th class="s" data-k="ppm">Pts/£</th>
           </tr></thead>
-          <tbody id="targets"></tbody>
+          <tbody id="targetRows"></tbody>
         </table>
       </div>
     </div>
-    <details class="how">
-      <summary>How the Desk score works</summary>
-      <div id="howText"></div>
-    </details>
+    <details class="how"><summary>How the Desk score works</summary><div id="howText"></div></details>
   </section>
 
-  <section id="tickerSec" hidden>
+  <section id="fixtures" hidden>
     <div class="sh"><h2>Fixture ticker</h2><div class="note" id="tickerNote"></div></div>
     <div class="card scroll"><table>
       <thead><tr id="tickHead"></tr></thead>
@@ -299,7 +481,7 @@ footer{border-top:1px solid var(--line);padding-top:17px;font-size:12px;color:va
     </table></div>
   </section>
 
-  <section id="injSec" hidden>
+  <section id="news" hidden>
     <div class="sh"><h2>Injuries &amp; suspensions</h2><div class="note">Straight from the official FPL player feed</div></div>
     <div class="clubs" id="clubs"></div>
   </section>
@@ -310,102 +492,170 @@ footer{border-top:1px solid var(--line);padding-top:17px;font-size:12px;color:va
   </footer>
 </div>
 
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dName" tabindex="-1">
+  <div class="dh">
+    <div>
+      <h3 id="dName">Player</h3>
+      <div class="meta" id="dMeta"></div>
+    </div>
+    <button class="dclose" id="dClose" aria-label="Close">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</aside>
+<div class="tip" id="tip"></div>
+
 <script>
 (function(){
 "use strict";
 
 var POS_ORDER = ["GKP","DEF","MID","FWD"];
+var SQUAD_SHAPE = { GKP:2, DEF:5, MID:5, FWD:3 };
+var MAX_PER_CLUB = 3;
+
 var $  = function(s){ return document.querySelector(s); };
 var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
 var esc = function(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
   return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); };
 
-var S = null, TEAM = {}, BYID = {}, MYIDS = {}, GWS = [];
+var S = null, D = {}, TEAM = {}, BYID = {}, MYIDS = {}, GWS = [], MAXPROJ = 1;
 
-/* ---------- persistence for filters (per-browser convenience only) ------- */
-function loadPrefs(){
-  try { return JSON.parse(localStorage.getItem("fpldesk.prefs") || "{}"); } catch(e){ return {}; }
+/* Club kit colours — body, sleeve/stripe, whether the shirt is striped.
+   Drawn as generic shirts; no club marks are used. */
+var KIT = {
+  1:{b:"#EF0107",s:"#FFFFFF"},            2:{b:"#670E36",s:"#95BFE5"},
+  3:{b:"#DA291C",s:"#000000",st:1},       4:{b:"#E30613",s:"#FFFFFF",st:1},
+  5:{b:"#0057B8",s:"#FFFFFF",st:1},       6:{b:"#034694",s:"#034694"},
+  7:{b:"#7ACBF0",s:"#FFFFFF"},            8:{b:"#1B458F",s:"#C4122E",st:1},
+  9:{b:"#003399",s:"#003399"},            10:{b:"#FFFFFF",s:"#000000"},
+  11:{b:"#F5A12D",s:"#000000",st:1},      12:{b:"#0044A9",s:"#FFFFFF"},
+  13:{b:"#FFFFFF",s:"#1D428A"},           14:{b:"#C8102E",s:"#C8102E"},
+  15:{b:"#6CABDD",s:"#FFFFFF"},           16:{b:"#DA291C",s:"#DA291C"},
+  17:{b:"#241F20",s:"#FFFFFF",st:1},      18:{b:"#DD0000",s:"#DD0000"},
+  19:{b:"#FFFFFF",s:"#132257"},           20:{b:"#EB172B",s:"#FFFFFF",st:1}
+};
+var kitSeq = 0;
+function shirt(teamId, w){
+  var k = KIT[teamId] || { b:"#8892a6", s:"#ffffff" };
+  var h = Math.round(w * 1.05), id = "k" + (++kitSeq);
+  var stripes = "";
+  if (k.st){
+    for (var i = 0; i < 4; i++){
+      stripes += '<rect x="' + (10 + i * 5) + '" y="4" width="2.6" height="38" fill="' + k.s + '"/>';
+    }
+  }
+  return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 40 42" aria-hidden="true">' +
+    '<defs><clipPath id="' + id + '">' +
+      '<path d="M10 8 L10 40 Q20 42 30 40 L30 8 Z"/>' +
+    '</clipPath></defs>' +
+    '<path d="M14 3 L5 7 L1.5 17 L8.5 20 L10 16 L10 40 Q20 42 30 40 L30 16 L31.5 20 L38.5 17 L35 7 L26 3 Q20 8.5 14 3 Z" ' +
+      'fill="' + k.b + '" stroke="rgba(0,0,0,.28)" stroke-width="1"/>' +
+    '<g clip-path="url(#' + id + ')">' + stripes + '</g>' +
+    '<path d="M14 3 L5 7 L1.5 17 L8.5 20 L10 16" fill="' + k.s + '" stroke="rgba(0,0,0,.28)" stroke-width="1"/>' +
+    '<path d="M26 3 L35 7 L38.5 17 L31.5 20 L30 16" fill="' + k.s + '" stroke="rgba(0,0,0,.28)" stroke-width="1"/>' +
+    '<path d="M14 3 Q20 8.5 26 3" fill="none" stroke="rgba(0,0,0,.3)" stroke-width="1.2"/>' +
+  "</svg>";
 }
-function savePrefs(p){
-  try { localStorage.setItem("fpldesk.prefs", JSON.stringify(p)); } catch(e){ /* private mode */ }
-}
-var prefs = Object.assign({ pos:"ALL", sort:"score", dir:-1, maxPrice:16, hideFlag:true, hideOwned:false, fitOnly:false, q:"" }, loadPrefs());
 
-/* ---------- helpers ----------------------------------------------------- */
-function fdrClass(d){ return "f" + Math.min(5, Math.max(2, d)); }
+/* ---------- prefs ---------- */
+function loadPrefs(){ try { return JSON.parse(localStorage.getItem("fpldesk.prefs") || "{}"); } catch(e){ return {}; } }
+function savePrefs(){ try { localStorage.setItem("fpldesk.prefs", JSON.stringify(prefs)); } catch(e){} }
+var prefs = Object.assign(
+  { pos:"ALL", sort:"score", dir:-1, maxPrice:16, hideFlag:true, hideOwned:false, q:"", theme:null, freeTransfers:1 },
+  loadPrefs()
+);
+
+/* ---------- theme ---------- */
+function applyTheme(){
+  if (prefs.theme) document.documentElement.setAttribute("data-theme", prefs.theme);
+  else document.documentElement.removeAttribute("data-theme");
+}
+applyTheme();
+$("#themeBtn").addEventListener("click", function(){
+  var dark = document.documentElement.getAttribute("data-theme") === "dark" ||
+    (!prefs.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  prefs.theme = dark ? "light" : "dark";
+  applyTheme(); savePrefs();
+});
+
+/* ---------- helpers ---------- */
+function fdrClass(d){ return "f" + Math.min(5, Math.max(2, Math.round(d))); }
 function statusTag(p){
   if (p.status === "a") return "";
   if (p.status === "s") return '<span class="tag t-susp">susp</span>';
-  if (p.status === "d") return '<span class="tag t-doubt">' + (p.chance != null ? p.chance + "%" : "doubt") + '</span>';
+  if (p.status === "d") return '<span class="tag t-doubt">' + (p.chance != null ? p.chance + "%" : "doubt") + "</span>";
   return '<span class="tag t-out">out</span>';
-}
-function fmtDeadline(iso){
-  var d = new Date(iso);
-  return {
-    long: d.toLocaleString(undefined, { weekday:"long", day:"numeric", month:"long", hour:"numeric", minute:"2-digit" }),
-    utc:  d.toLocaleString("en-GB", { timeZone:"UTC", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) + " UTC"
-  };
 }
 function minsPct(p){
   var played = Math.max(1, (S.currentEvent ? S.currentEvent.id : 1));
   return Math.min(1, p.mins / (90 * played));
 }
+function nextFixtures(teamId, n){
+  var list = (S.fixtures[teamId] || []).slice();
+  var out = [], seen = {};
+  for (var i = 0; i < list.length && out.length < n; i++){
+    out.push(list[i]); seen[list[i].gw] = 1;
+  }
+  return out;
+}
+function fxChip(f){
+  var o = (TEAM[f.opp] || {}).short || "?";
+  return '<span class="fx ' + fdrClass(f.d) + '">' + (f.home ? o : o.toLowerCase()) +
+         ' <small>' + (f.home ? "H" : "A") + "</small></span>";
+}
 
-/* ---------- Desk score --------------------------------------------------
-   Expressed in points per gameweek, so a goalkeeper and a striker can be
-   compared on the same axis.
+/* ---------- tooltip ---------- */
+var tipEl = $("#tip");
+function showTip(html, x, y){
+  tipEl.innerHTML = html; tipEl.classList.add("on");
+  var r = tipEl.getBoundingClientRect();
+  tipEl.style.left = Math.max(6, Math.min(window.innerWidth - r.width - 6, x - r.width / 2)) + "px";
+  tipEl.style.top = Math.max(6, y - r.height - 10) + "px";
+}
+function hideTip(){ tipEl.classList.remove("on"); }
 
-   The three inputs are already in points-per-game units: the FPL model's own
-   expected points for the next match, the player's season average, and recent
-   form. Early on the season average and form are built on almost no evidence,
-   so the blend leans on the model and shifts toward observed output as
-   gameweeks accumulate. That blend is then adjusted for the difficulty of the
-   next five fixtures and for how reliably the player actually starts.
-------------------------------------------------------------------------- */
-var MAXPROJ = 1;
+/* ---------- Desk score ---------- */
 function computeScores(players){
   var gwPlayed = S.currentEvent ? S.currentEvent.id : 1;
-  var lean = Math.min(1, Math.max(0, (gwPlayed - 1) / 7)); // 0 at GW1, 1 by GW8
-  var wEp   = 0.70 - 0.40 * lean;
-  var wPpg  = 0.15 + 0.25 * lean;
-  var wForm = 0.15 + 0.15 * lean;
+  var lean = Math.min(1, Math.max(0, (gwPlayed - 1) / 7));
+  var wEp = 0.70 - 0.40 * lean, wPpg = 0.15 + 0.25 * lean, wForm = 0.15 + 0.15 * lean;
 
   players.forEach(function(p){
     var fixMult = Math.min(1.35, Math.max(0.55, (5.5 - p.fdr5) / 2.5));
     p.minsPct = minsPct(p);
     var secure = 0.25 + 0.75 * p.minsPct;
-    var base = wEp * p.epNext + wPpg * p.ppg + wForm * p.form;
-    p.score = Math.round(base * fixMult * secure * 100) / 100;
+    p.score = Math.round((wEp * p.epNext + wPpg * p.ppg + wForm * p.form) * fixMult * secure * 100) / 100;
     p.ppm = p.price > 0 ? Math.round((p.pts / p.price) * 10) / 10 : 0;
   });
   MAXPROJ = players.reduce(function(m, p){ return Math.max(m, p.score); }, 1) || 1;
 
   $("#howText").innerHTML =
-    "The Desk score is an estimate of <b>points per gameweek</b>, which is why a keeper and a striker can sit " +
-    "in the same ranking. It blends three figures that are already measured per game &mdash; the FPL model's own " +
-    "<b>expected points</b> for the next match, the player's <b>season average</b>, and recent <b>form</b> &mdash; " +
-    "then adjusts for the <b>next five fixtures</b> and for <b>minutes</b>, so someone producing in 25 minutes off " +
-    "the bench is marked down against someone who starts every week. " +
+    "The Desk score estimates <b>points per gameweek</b>, which is why a keeper and a striker can sit in the same " +
+    "ranking. It blends three figures already measured per game &mdash; the FPL model's own <b>expected points</b>, " +
+    "the player's <b>season average</b>, and recent <b>form</b> &mdash; then adjusts for the <b>next five fixtures</b> " +
+    "and for <b>minutes</b>, so someone producing in 25 minutes off the bench is marked down against someone who starts. " +
     "With <b>" + gwPlayed + " gameweek" + (gwPlayed === 1 ? "" : "s") + "</b> played the weighting sits at " +
     Math.round(wEp * 100) + "% expected points, " + Math.round(wPpg * 100) + "% season average, " +
     Math.round(wForm * 100) + "% form &mdash; early on it leans on the model, because two good games is not evidence. " +
-    "Treat it as a shortlist-builder, not a forecast: it knows nothing about rotation talk, penalties, or what a manager said in a press conference.";
+    "It knows nothing about press conferences, rotation, or penalty duties. Build a shortlist with it, then apply what you know.";
 }
 
-/* ---------- render: header ---------------------------------------------- */
+/* ---------- header ---------- */
 function renderHeader(){
   var ne = S.nextEvent;
   if (ne){
-    var f = fmtDeadline(ne.deadline);
+    var d = new Date(ne.deadline);
     $("#eyebrow").textContent = "Next deadline · " + ne.name;
-    $("#deadline").textContent = f.long;
-    $("#deadlineSub").textContent = "Your local time · " + f.utc;
-    tick(new Date(ne.deadline).getTime());
-    setInterval(function(){ tick(new Date(ne.deadline).getTime()); }, 30000);
+    $("#deadline").textContent = d.toLocaleString(undefined, { weekday:"long", day:"numeric", month:"long", hour:"numeric", minute:"2-digit" });
+    $("#deadlineSub").textContent = "Your local time · " +
+      d.toLocaleString("en-GB", { timeZone:"UTC", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) + " UTC";
+    var t = d.getTime();
+    tick(t); setInterval(function(){ tick(t); }, 30000);
   } else {
     $("#eyebrow").textContent = "Season";
     $("#deadline").textContent = "No upcoming deadline";
-    $("#deadlineSub").textContent = "";
     $("#cd").textContent = "—";
   }
 
@@ -417,17 +667,16 @@ function renderHeader(){
   if (S.currentEvent) cells.push(["Gameweek", S.currentEvent.name.replace("Gameweek ", "GW ") + (S.currentEvent.finished ? " · done" : " · live")]);
   if (S.entry && !S.entry.error){
     cells.push(["Overall rank", S.entry.overallRank ? S.entry.overallRank.toLocaleString() : "—"]);
-    cells.push(["Points", S.entry.overallPoints + " <small>· " + S.entry.gwPoints + " this GW</small>"]);
-    cells.push(["Bank", "£" + S.entry.bank.toFixed(1) + "m <small>· squad £" + S.entry.squadValue.toFixed(1) + "m</small>"]);
+    cells.push(["Points", S.entry.overallPoints + ' <small>· ' + S.entry.gwPoints + " this GW</small>"]);
+    cells.push(["Bank", "£" + S.entry.bank.toFixed(1) + 'm <small>· squad £' + S.entry.squadValue.toFixed(1) + "m</small>"]);
   }
   cells.push(["Flagged (1%+ owned)", String(flagged)]);
-  cells.push(["Price moves brewing", rising + " up <small>· " + falling + " down</small>"]);
+  cells.push(["Price moves brewing", rising + ' up <small>· ' + falling + " down</small>"]);
 
   $("#strip").innerHTML = cells.map(function(c){
     return '<div class="cell"><div class="ck">' + esc(c[0]) + '</div><div class="cv">' + c[1] + "</div></div>";
   }).join("");
 }
-
 function tick(target){
   var el = $("#cd"), diff = target - Date.now();
   if (diff <= 0){ el.textContent = "closed"; return; }
@@ -435,83 +684,84 @@ function tick(target){
   el.textContent = d > 0 ? d + "d " + h + "h" : h + "h " + m + "m";
 }
 
-/* ---------- render: squad ----------------------------------------------- */
+/* ---------- pitch ---------- */
+function pitchPlayer(p, pick){
+  var badges = "";
+  if (pick && pick.captain) badges += '<span class="arm">C</span>';
+  else if (pick && pick.vice) badges += '<span class="arm v">V</span>';
+  if (p.status !== "a"){
+    var cls = p.status === "s" ? "susp" : p.status === "d" ? "doubt" : "out";
+    badges += '<span class="pin ' + cls + '">!</span>';
+  } else if (p.price_.band === "rising" || p.price_.band === "warm"){
+    badges += '<span class="pin up">&#9650;</span>';
+  } else if (p.price_.band === "falling" || p.price_.band === "cooling"){
+    badges += '<span class="pin dn">&#9660;</span>';
+  }
+  var nf = nextFixtures(p.team, 1)[0];
+  var sub = nf ? ((TEAM[nf.opp] || {}).short || "?") + (nf.home ? " (H)" : " (A)") : "blank";
+  return '<button class="pp" data-pid="' + p.id + '" title="' + esc(p.full) + '">' +
+    (badges ? '<span class="pp-badges">' + badges + "</span>" : "") +
+    shirt(p.team, 46) +
+    '<span class="pp-n">' + esc(p.name) + "</span>" +
+    '<span class="pp-s">' + esc(sub) + "</span>" +
+  "</button>";
+}
+
 function renderSquad(){
   var e = S.entry;
   if (!e || e.error || !e.picks || !e.picks.length){
     $("#squadNote").textContent = "Not connected";
-    $("#squad").innerHTML =
+    $("#squadCard").innerHTML =
       '<div class="setup"><h3>Add your team ID to switch this on</h3>' +
-      '<p>Everything else on this page works without it. With it, the page also shows your fifteen, your bank ' +
-      'and free transfers, and filters the transfer table against what you already own.</p><ul class="steps">' +
+      "<p>Everything else works without it. With it you also get the pitch view, the planner, and " +
+      "your own players marked across the tables.</p><ul class=\"steps\">" +
       '<li><span class="sn">1</span><div>Log in at <code>fantasy.premierleague.com</code>, click <b>Points</b>, and copy the number from the address bar: <code>/entry/<b>1234567</b>/event/2</code></div></li>' +
-      '<li><span class="sn">2</span><div>In this project\'s GitHub repo, open <code>config.json</code> and click the pencil icon.</div></li>' +
-      '<li><span class="sn">3</span><div>Change <code>"teamId": null</code> to <code>"teamId": 1234567</code> and commit. The page refreshes itself within a few minutes.</div></li>' +
+      '<li><span class="sn">2</span><div>Open <code>config.json</code> in your repo and click the pencil.</div></li>' +
+      '<li><span class="sn">3</span><div>Set <code>"teamId": 1234567</code> and commit. The page catches up within a couple of minutes.</div></li>' +
       "</ul></div>";
     return;
   }
 
-  MYIDS = {};
-  e.picks.forEach(function(p){ MYIDS[p.id] = p; });
+  MYIDS = {}; e.picks.forEach(function(p){ MYIDS[p.id] = p; });
 
+  var starters = e.picks.filter(function(p){ return p.slot <= 11; });
+  var bench    = e.picks.filter(function(p){ return p.slot > 11; })
+                        .sort(function(a,b){ return a.slot - b.slot; });
+
+  var rows = { GKP:[], DEF:[], MID:[], FWD:[] };
+  starters.forEach(function(pk){
+    var p = BYID[pk.id]; if (!p) return;
+    rows[p.pos].push({ p:p, pk:pk });
+  });
+
+  var formation = [rows.DEF.length, rows.MID.length, rows.FWD.length].join("-");
   var chips = e.chipsUsed && e.chipsUsed.length
-    ? e.chipsUsed.map(function(c){ return c.name + " (GW" + c.gw + ")"; }).join(", ")
-    : "none used";
-  $("#squadNote").textContent = e.name + " · " + e.transfersMade + " transfer" +
+    ? e.chipsUsed.map(function(c){ return c.name + " (GW" + c.gw + ")"; }).join(", ") : "none used";
+  $("#squadNote").textContent = e.name + " · " + formation + " · " + e.transfersMade + " transfer" +
     (e.transfersMade === 1 ? "" : "s") + (e.transferCost ? " (−" + e.transferCost + ")" : "") + " · chips: " + chips;
 
-  var groups = {};
-  e.picks.forEach(function(p){
-    var pl = BYID[p.id];
-    if (!pl) return;
-    (groups[pl.pos] = groups[pl.pos] || []).push({ pick:p, pl:pl });
-  });
-
-  var html = "";
+  var html = '<div class="pitch"><span class="formation">' + formation + "</span>";
   POS_ORDER.forEach(function(pos){
-    if (!groups[pos]) return;
-    html += '<div class="pos-h">' + pos + "</div>";
-    groups[pos].sort(function(a,b){ return a.pick.slot - b.pick.slot; }).forEach(function(row){
-      var p = row.pl, pick = row.pick, t = TEAM[p.team] || {};
-      var nxt = (S.fixtures[p.team] || []).filter(function(f){ return f.gw === S.horizonFrom; });
-      var fx = nxt.length
-        ? nxt.map(function(f){
-            var o = (TEAM[f.opp] || {}).short || "?";
-            return '<span class="fx ' + fdrClass(f.d) + '">' + (f.home ? o : o.toLowerCase()) +
-                   ' <small>' + (f.home ? "H" : "A") + "</small></span>";
-          }).join(" ")
-        : '<span class="fx f3">blank</span>';
-      var mv = p.price_.band;
-      var mvTag = mv === "rising" || mv === "warm" ? '<span class="tag t-up">▲</span>'
-                : mv === "falling" || mv === "cooling" ? '<span class="tag t-down">▼</span>' : "";
-      html +=
-        '<div class="pl' + (p.status !== "a" ? " flag" : "") + '">' +
-          '<div class="pl-top">' +
-            (pick.captain ? '<span class="cap">C</span>' : pick.vice ? '<span class="cap" style="background:var(--text-3)">V</span>' : "") +
-            '<span class="pl-n">' + esc(p.name) + "</span>" + statusTag(p) + mvTag +
-            '<span class="pl-p">£' + p.price.toFixed(1) + "</span>" +
-          "</div>" +
-          '<div class="pl-m"><span class="badge">' + esc(t.short || "") + "</span>" + fx +
-            (pick.slot > 11 ? '<span style="color:var(--text-3)">bench ' + (pick.slot - 11) + "</span>" : "") +
-          "</div>" +
-          '<div class="pl-m"><span>form <b>' + p.form.toFixed(1) + "</b></span><span>pts <b>" + p.pts +
-            "</b></span><span>own <b>" + p.owned.toFixed(1) + "%</b></span></div>" +
-          (p.news ? '<div class="pl-news">' + esc(p.news) + "</div>" : "") +
-        "</div>";
-    });
+    if (!rows[pos].length) return;
+    html += '<div class="row">' + rows[pos].map(function(r){ return pitchPlayer(r.p, r.pk); }).join("") + "</div>";
   });
-  $("#squad").innerHTML = '<div class="squad">' + html + "</div>";
+  html += "</div>";
+
+  html += '<div class="bench"><div class="bench-l">Bench</div><div class="row">' +
+    bench.map(function(pk){
+      var p = BYID[pk.id];
+      return p ? pitchPlayer(p, pk) : "";
+    }).join("") + "</div></div>";
+
+  $("#squadCard").innerHTML = html;
 }
 
-/* ---------- render: alerts ---------------------------------------------- */
+/* ---------- alerts ---------- */
 function renderAlerts(){
-  var out = [];
-  var e = S.entry;
-
-  if (e && !e.error && e.picks && e.picks.length){
+  var out = [], e = S.entry;
+  if (e && !e.error && e.picks){
     e.picks.forEach(function(pk){
-      var p = BYID[pk.id];
-      if (!p) return;
+      var p = BYID[pk.id]; if (!p) return;
       if (p.status !== "a"){
         var sev = (p.status === "d" && (p.chance == null || p.chance >= 50)) ? "warn" : "crit";
         out.push([sev, esc(p.name) + " is " + (p.status === "s" ? "suspended" : p.status === "d" ? "a doubt" : "unavailable"),
@@ -522,23 +772,16 @@ function renderAlerts(){
       }
     });
   }
-
-  S.players
-    .filter(function(p){ return p.price_.band === "rising" && p.owned >= 4 && !MYIDS[p.id]; })
-    .sort(function(a,b){ return b.price_.ratio - a.price_.ratio; })
-    .slice(0, 3)
+  S.players.filter(function(p){ return p.price_.band === "rising" && p.owned >= 4 && !MYIDS[p.id]; })
+    .sort(function(a,b){ return b.price_.ratio - a.price_.ratio; }).slice(0, 3)
     .forEach(function(p){
       out.push(["good", esc(p.name) + " is close to a price rise",
-        "Net " + p.price_.net.toLocaleString() + " transfers in, " + p.owned.toFixed(1) +
-        "% owned. Buying before the rise earns you the extra value."]);
+        "Net " + p.price_.net.toLocaleString() + " transfers in, " + p.owned.toFixed(1) + "% owned."]);
     });
 
   if (!out.length){ $("#alertSec").hidden = true; return; }
-
-  // Availability problems outrank money; a price rise you might act on comes last.
   var sev = { crit:0, warn:1, good:2 };
-  out.sort(function(a, b){ return sev[a[0]] - sev[b[0]]; });
-
+  out.sort(function(a,b){ return sev[a[0]] - sev[b[0]]; });
   $("#alertSec").hidden = false;
   $("#alertNote").textContent = out.length + " item" + (out.length === 1 ? "" : "s");
   $("#alerts").innerHTML = out.slice(0, 10).map(function(a){
@@ -546,36 +789,256 @@ function renderAlerts(){
   }).join("");
 }
 
-/* ---------- render: price watch ----------------------------------------- */
+/* ---------- planner ---------- */
+var plan = null;
+function initPlanner(){
+  var e = S.entry;
+  if (!e || e.error || !e.picks || !e.picks.length){ $("#planner").hidden = true; return; }
+  $("#planner").hidden = false;
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem("fpldesk.plan") || "null"); } catch(err){}
+  var original = e.picks.slice().sort(function(a,b){ return a.slot - b.slot; }).map(function(p){ return p.id; });
+  plan = (saved && saved.original && saved.original.join() === original.join() && saved.current)
+    ? { original: original, current: saved.current.slice() }
+    : { original: original, current: original.slice() };
+  renderPlanner();
+}
+function savePlan(){ try { localStorage.setItem("fpldesk.plan", JSON.stringify(plan)); } catch(e){} }
+
+function planStats(){
+  var e = S.entry;
+  var spend = 0, changes = 0;
+  plan.original.forEach(function(oid, i){
+    var nid = plan.current[i];
+    if (nid !== oid){
+      changes++;
+      var o = BYID[oid], n = BYID[nid];
+      if (o && n) spend += n.price - o.price;
+    }
+  });
+  var remaining = Math.round((e.bank - spend) * 10) / 10;
+  var ft = Math.max(0, parseInt(prefs.freeTransfers, 10) || 0);
+  var hits = Math.max(0, changes - ft) * 4;
+
+  var before = 0, after = 0;
+  plan.original.forEach(function(id){ var p = BYID[id]; if (p) before += p.score; });
+  plan.current.forEach(function(id){ var p = BYID[id]; if (p) after += p.score; });
+
+  // squad legality
+  var counts = { GKP:0, DEF:0, MID:0, FWD:0 }, clubs = {}, dupes = [];
+  var seen = {};
+  plan.current.forEach(function(id){
+    var p = BYID[id]; if (!p) return;
+    counts[p.pos]++;
+    clubs[p.team] = (clubs[p.team] || 0) + 1;
+    if (seen[id]) dupes.push(p.name);
+    seen[id] = 1;
+  });
+  var problems = [];
+  POS_ORDER.forEach(function(pos){
+    if (counts[pos] !== SQUAD_SHAPE[pos]) problems.push("You have " + counts[pos] + " " + pos + ", not " + SQUAD_SHAPE[pos]);
+  });
+  Object.keys(clubs).forEach(function(tid){
+    if (clubs[tid] > MAX_PER_CLUB) problems.push("Too many from " + ((TEAM[tid] || {}).name || "one club") + " (" + clubs[tid] + " of a maximum " + MAX_PER_CLUB + ")");
+  });
+  if (dupes.length) problems.push("Duplicate player: " + dupes.join(", "));
+  if (remaining < 0) problems.push("Over budget by £" + Math.abs(remaining).toFixed(1) + "m");
+
+  return { spend:spend, remaining:remaining, changes:changes, hits:hits,
+           delta: Math.round((after - before) * 100) / 100, problems:problems };
+}
+
+function renderPlanner(){
+  var st = planStats(), e = S.entry;
+  var netGain = Math.round((st.delta * 5 - st.hits) * 10) / 10;
+
+  $("#plHead").innerHTML =
+    '<div class="pl-stat"><span class="pl-k">In the bank</span><span class="pl-v ' +
+      (st.remaining < 0 ? "bad" : st.remaining > 0 ? "good" : "") + '">£' + st.remaining.toFixed(1) + "m</span></div>" +
+    '<div class="pl-stat"><span class="pl-k">Transfers</span><span class="pl-v">' + st.changes + "</span></div>" +
+    '<div class="pl-stat"><span class="pl-k">Points hit</span><span class="pl-v ' + (st.hits ? "bad" : "") + '">' +
+      (st.hits ? "−" + st.hits : "0") + "</span></div>" +
+    '<div class="pl-stat"><span class="pl-k">Desk change</span><span class="pl-v ' +
+      (st.delta > 0 ? "good" : st.delta < 0 ? "bad" : "") + '">' +
+      (st.delta > 0 ? "+" : "") + st.delta.toFixed(2) + "</span></div>" +
+    '<div class="pl-stat"><span class="pl-k">Net over 5 GW</span><span class="pl-v ' +
+      (netGain > 0 ? "good" : netGain < 0 ? "bad" : "") + '">' + (netGain > 0 ? "+" : "") + netGain.toFixed(1) + "</span></div>" +
+    '<label class="inline" style="margin-left:auto">free transfers<input type="number" id="ftIn" min="0" max="5" value="' +
+      (prefs.freeTransfers || 0) + '" style="width:52px"></label>' +
+    '<button class="btn" id="plReset"' + (st.changes ? "" : " disabled") + ">Reset</button>";
+
+  $("#plWarn").innerHTML = st.problems.length
+    ? st.problems.map(function(t){
+        return '<div class="warnbox"><span>&#9888;</span><span>' + esc(t) + "</span></div>";
+      }).join("")
+    : "";
+
+  var byPos = { GKP:[], DEF:[], MID:[], FWD:[] };
+  plan.current.forEach(function(id, i){
+    var p = BYID[id]; if (!p) return;
+    byPos[p.pos].push({ p:p, i:i });
+  });
+
+  var html = "";
+  POS_ORDER.forEach(function(pos){
+    if (!byPos[pos].length) return;
+    html += '<li class="pgrp">' + pos + "</li>";
+    byPos[pos].forEach(function(row){
+      var p = row.p, oid = plan.original[row.i], changed = oid !== p.id;
+      var o = BYID[oid];
+      var nf = nextFixtures(p.team, 3);
+      html += '<li class="' + (changed ? "changed" : "") + '">' +
+        '<span class="badge">' + esc((TEAM[p.team] || {}).short || "") + "</span>" +
+        '<span class="pn" data-pid="' + p.id + '">' + esc(p.name) + "</span>" + statusTag(p) +
+        (changed && o ? '<span class="old">' + esc(o.name) + "</span>" : "") +
+        '<span class="sp">' +
+          '<span class="fxs">' + nf.map(fxChip).join(" ") + "</span>" +
+          '<span class="mono" style="width:44px;text-align:right">£' + p.price.toFixed(1) + "</span>" +
+          '<span class="mono" style="width:38px;text-align:right;color:var(--text-3)">' + p.score.toFixed(1) + "</span>" +
+          '<button class="btn" data-swap="' + row.i + '">Swap</button>' +
+        "</span></li>";
+    });
+  });
+  $("#plList").innerHTML = html;
+
+  $("#ftIn").addEventListener("change", function(){
+    prefs.freeTransfers = Math.max(0, Math.min(5, parseInt(this.value, 10) || 0));
+    savePrefs(); renderPlanner();
+  });
+  var rb = $("#plReset");
+  if (rb) rb.addEventListener("click", function(){
+    plan.current = plan.original.slice(); savePlan(); renderPlanner();
+  });
+  $$("#plList [data-swap]").forEach(function(b){
+    b.addEventListener("click", function(){ openSwap(parseInt(b.dataset.swap, 10)); });
+  });
+}
+
+function openSwap(idx){
+  var cur = BYID[plan.current[idx]];
+  if (!cur) return;
+  var st = planStats();
+  // budget available for this slot = what's left plus what this player frees up
+  var ceiling = Math.round((st.remaining + cur.price) * 10) / 10;
+  var inSquad = {};
+  plan.current.forEach(function(id, i){ if (i !== idx) inSquad[id] = 1; });
+
+  var options = S.players.filter(function(p){
+    return p.pos === cur.pos && !inSquad[p.id] && p.price <= ceiling + 0.001;
+  }).sort(function(a,b){ return b.score - a.score; }).slice(0, 60);
+
+  openDrawer({
+    title: "Replace " + cur.name,
+    meta: (TEAM[cur.team] || {}).name + " · " + cur.pos + " · up to £" + ceiling.toFixed(1) + "m",
+    body:
+      '<div class="dblock"><h4>' + options.length + " option" + (options.length === 1 ? "" : "s") + " you can afford</h4>" +
+      '<ul class="plist" style="border:1px solid var(--line-soft);border-radius:9px;overflow:hidden">' +
+      (options.length ? options.map(function(p){
+        var nf = nextFixtures(p.team, 3);
+        return "<li>" +
+          '<span class="badge">' + esc((TEAM[p.team] || {}).short || "") + "</span>" +
+          '<span class="pn">' + esc(p.name) + "</span>" + statusTag(p) +
+          '<span class="sp"><span class="fxs">' + nf.map(fxChip).join(" ") + "</span>" +
+            '<span class="mono" style="width:40px;text-align:right">£' + p.price.toFixed(1) + "</span>" +
+            '<span class="mono" style="width:34px;text-align:right;color:var(--text-3)">' + p.score.toFixed(1) + "</span>" +
+            '<button class="btn primary" data-buy="' + p.id + '">In</button>' +
+          "</span></li>";
+      }).join("") : '<li><span class="empty-note">Nothing in this position fits the budget. Free up money elsewhere first.</span></li>') +
+      "</ul></div>"
+  });
+
+  $$("#dBody [data-buy]").forEach(function(b){
+    b.addEventListener("click", function(){
+      plan.current[idx] = parseInt(b.dataset.buy, 10);
+      savePlan(); renderPlanner(); closeDrawer();
+    });
+  });
+}
+
+/* ---------- shelves ---------- */
+function shelfCard(p, why){
+  return '<button class="pcard" data-pid="' + p.id + '">' +
+    '<div class="top">' + shirt(p.team, 22) + '<span class="nm">' + esc(p.name) + "</span></div>" +
+    '<div class="why">' + esc(why) + "</div>" +
+    '<div class="row2"><span>£<b>' + p.price.toFixed(1) + "</b></span><span>own <b>" + p.owned.toFixed(1) +
+      "%</b></span><span>desk <b>" + p.score.toFixed(1) + "</b></span></div>" +
+  "</button>";
+}
+function renderShelves(){
+  var pool = S.players.filter(function(p){ return p.status === "a" && p.minsPct > 0.35; });
+  var mine = function(p){ return !MYIDS[p.id]; };
+
+  // A shelf sorted purely on fixtures fills up with one club's entire back four.
+  // Cap each club so the shelf stays a shortlist rather than a team sheet.
+  function spread(list, perTeam, limit){
+    var seen = {}, out = [];
+    for (var i = 0; i < list.length && out.length < limit; i++){
+      var t = list[i].team;
+      if ((seen[t] || 0) >= perTeam) continue;
+      seen[t] = (seen[t] || 0) + 1;
+      out.push(list[i]);
+    }
+    return out;
+  }
+
+  var shelves = [
+    { t:"In form", d:"Scoring well right now and not yet widely owned.",
+      rows: spread(pool.filter(function(p){ return p.form >= 3 && p.owned < 20 && mine(p); })
+                .sort(function(a,b){ return b.form - a.form; }), 2, 12),
+      why: function(p){ return "form " + p.form.toFixed(1); } },
+    { t:"Best value", d:"Most Desk score for every million spent.",
+      rows: spread(pool.filter(mine)
+                .sort(function(a,b){ return (b.score / b.price) - (a.score / a.price); }), 2, 12),
+      why: function(p){ return (p.score / p.price).toFixed(2) + " per £m"; } },
+    { t:"Kind fixtures", d:"Easiest five-gameweek run from here, at most two per club.",
+      rows: spread(pool.filter(function(p){ return p.fdr5 <= 2.9 && p.score > 0 && mine(p); })
+                .sort(function(a,b){ return (a.fdr5 - b.fdr5) || (b.score - a.score); }), 2, 12),
+      why: function(p){ return "FDR " + p.fdr5.toFixed(1); } },
+    { t:"Differentials", d:"Under 5% owned with numbers that hold up.",
+      rows: spread(pool.filter(function(p){ return p.owned < 5 && p.score > 0 && mine(p); })
+                .sort(function(a,b){ return b.score - a.score; }), 2, 12),
+      why: function(p){ return p.owned.toFixed(1) + "% owned"; } },
+    { t:"Budget enablers", d:"Cheap, and they actually start.",
+      rows: spread(pool.filter(function(p){ return p.price <= 5 && p.minsPct >= 0.7 && mine(p); })
+                .sort(function(a,b){ return b.score - a.score; }), 2, 12),
+      why: function(p){ return Math.round(p.minsPct * 100) + "% of minutes"; } }
+  ].filter(function(s){ return s.rows.length >= 3; });
+
+  if (!shelves.length){ $("#picks").hidden = true; return; }
+  $("#picks").hidden = false;
+  $("#shelves").innerHTML = shelves.map(function(s){
+    return '<div class="shelf"><h3>' + esc(s.t) + "</h3><p>" + esc(s.d) + '</p><div class="rail">' +
+      s.rows.map(function(p){ return shelfCard(p, s.why(p)); }).join("") + "</div></div>";
+  }).join("");
+}
+
+/* ---------- price watch ---------- */
 function priceRow(p, dir){
   var pct = Math.min(100, Math.round(Math.abs(p.price_.ratio) / 0.075 * 100));
   return "<li>" +
     '<span class="badge">' + esc((TEAM[p.team] || {}).short || "") + "</span>" +
-    '<span class="n">' + esc(p.name) + "</span>" +
+    '<span class="n" data-pid="' + p.id + '">' + esc(p.name) + "</span>" +
     (MYIDS[p.id] ? '<span class="tag t-up" style="margin-left:6px">owned</span>' : "") +
     '<span class="meta">£' + p.price.toFixed(1) + " · " + p.owned.toFixed(1) + "%</span>" +
     '<span class="meter"><i style="width:' + pct + "%;background:var(--" + (dir === "up" ? "up" : "down") + ')"></i></span>' +
-    "</li>";
+  "</li>";
 }
 function renderPrices(){
   var up = S.players.filter(function(p){ return p.price_.ratio > 0.02 && p.owned >= 0.3; })
                     .sort(function(a,b){ return b.price_.ratio - a.price_.ratio; }).slice(0, 12);
   var dn = S.players.filter(function(p){ return p.price_.ratio < -0.02 && p.owned >= 0.3; })
                     .sort(function(a,b){ return a.price_.ratio - b.price_.ratio; }).slice(0, 12);
-  if (!up.length && !dn.length){ $("#priceSec").hidden = true; return; }
-  $("#priceSec").hidden = false;
-  $("#rising").innerHTML  = up.length ? up.map(function(p){ return priceRow(p, "up"); }).join("")
-    : '<li class="dim">Nothing moving up sharply right now.</li>';
+  if (!up.length && !dn.length){ $("#prices").hidden = true; return; }
+  $("#prices").hidden = false;
+  $("#rising").innerHTML = up.length ? up.map(function(p){ return priceRow(p, "up"); }).join("")
+    : '<li><span class="empty-note">Nothing moving up sharply.</span></li>';
   $("#falling").innerHTML = dn.length ? dn.map(function(p){ return priceRow(p, "down"); }).join("")
-    : '<li class="dim">Nothing moving down sharply right now.</li>';
+    : '<li><span class="empty-note">Nothing moving down sharply.</span></li>';
 }
 
-/* ---------- render: targets --------------------------------------------- */
+/* ---------- targets ---------- */
 function renderTargets(){
   var q = prefs.q.trim().toLowerCase();
-  var budget = null;
-  if (prefs.fitOnly && S.entry && !S.entry.error) budget = S.entry.bank;
-
   var rows = S.players.filter(function(p){
     if (p.pts === 0 && p.mins === 0 && p.epNext === 0) return false;
     if (prefs.pos !== "ALL" && p.pos !== prefs.pos) return false;
@@ -583,51 +1046,48 @@ function renderTargets(){
     if (prefs.hideFlag && p.status !== "a") return false;
     if (prefs.hideOwned && MYIDS[p.id]) return false;
     if (q){
-      var t = (TEAM[p.team] || {});
+      var t = TEAM[p.team] || {};
       if ((p.full + " " + p.name + " " + (t.name || "") + " " + (t.short || "")).toLowerCase().indexOf(q) === -1) return false;
     }
     return true;
   });
-
-  rows.sort(function(a, b){
-    var k = prefs.sort, av = a[k], bv = b[k];
-    if (k === "name"){ return prefs.dir * String(av).localeCompare(String(bv)); }
-    return prefs.dir * ((av || 0) - (bv || 0));
+  rows.sort(function(a,b){
+    var k = prefs.sort;
+    if (k === "name") return prefs.dir * String(a[k]).localeCompare(String(b[k]));
+    return prefs.dir * ((a[k] || 0) - (b[k] || 0));
   });
 
   var CAP = 120;
-  $("#targetNote").textContent =
-    (rows.length > CAP ? "top " + CAP + " of " + rows.length : rows.length + " player" + (rows.length === 1 ? "" : "s")) +
-    (budget != null ? " · £" + budget.toFixed(1) + "m in the bank" : "");
+  $("#targetNote").textContent = rows.length > CAP
+    ? "top " + CAP + " of " + rows.length
+    : rows.length + " player" + (rows.length === 1 ? "" : "s");
 
-  $("#targets").innerHTML = rows.slice(0, CAP).map(function(p){
+  $("#targetRows").innerHTML = rows.slice(0, CAP).map(function(p){
     var t = TEAM[p.team] || {};
-    var mine = !!MYIDS[p.id];
     return "<tr>" +
-      '<td class="l"><span class="pname">' + esc(p.name) + "</span>" + statusTag(p) +
-        (mine ? '<span class="tag t-up" style="margin-left:6px">owned</span>' : "") +
+      '<td class="l"><span class="pname" data-pid="' + p.id + '">' + esc(p.name) + "</span>" + statusTag(p) +
+        (MYIDS[p.id] ? '<span class="tag t-up" style="margin-left:6px">owned</span>' : "") +
         '<span class="psub">' + esc(t.short || "") + " · " + p.pos + "</span></td>" +
-      "<td class=\"mono\">" + p.price.toFixed(1) + "</td>" +
+      '<td class="mono">' + p.price.toFixed(1) + "</td>" +
       '<td class="score">' + p.score.toFixed(1) +
         '<i class="bar" style="width:' + Math.max(2, Math.round(p.score / MAXPROJ * 42)) + 'px"></i></td>' +
       '<td class="mono">' + p.form.toFixed(1) + "</td>" +
       '<td class="mono">' + p.epNext.toFixed(1) + "</td>" +
       '<td class="mono">' + p.xGI90.toFixed(2) + "</td>" +
       '<td class="mono">' + Math.round(p.minsPct * 100) + "%</td>" +
-      '<td><span class="fx ' + fdrClass(Math.round(p.fdr5)) + '">' + p.fdr5.toFixed(1) + "</span></td>" +
+      '<td><span class="fx ' + fdrClass(p.fdr5) + '">' + p.fdr5.toFixed(1) + "</span></td>" +
       '<td class="mono">' + p.owned.toFixed(1) + "</td>" +
       '<td class="mono">' + p.ppm.toFixed(1) + "</td>" +
     "</tr>";
   }).join("") || '<tr><td colspan="10" class="c dim" style="padding:26px">No players match those filters.</td></tr>';
 }
 
-/* ---------- render: ticker ---------------------------------------------- */
+/* ---------- ticker ---------- */
 function renderTicker(){
   GWS = [];
   for (var g = S.horizonFrom; g < S.horizonFrom + Math.min(5, S.horizon); g++) GWS.push(g);
   $("#tickerNote").textContent = "Gameweeks " + GWS[0] + "–" + GWS[GWS.length - 1] + " · lower total is an easier run";
-  $("#tickHead").innerHTML = '<th class="l">Team</th>' +
-    GWS.map(function(g){ return "<th>GW" + g + "</th>"; }).join("") + "<th>Total</th>";
+  $("#tickHead").innerHTML = '<th class="l">Team</th>' + GWS.map(function(g){ return "<th>GW" + g + "</th>"; }).join("") + "<th>Total</th>";
 
   var rows = S.teams.map(function(t){
     var list = S.fixtures[t.id] || [], cells = [], sum = 0;
@@ -637,79 +1097,209 @@ function renderTicker(){
       else { cells.push(games); games.forEach(function(f){ sum += f.d; }); }
     });
     return { t:t, cells:cells, sum:sum };
-  }).sort(function(a, b){ return a.sum - b.sum || a.t.name.localeCompare(b.t.name); });
+  }).sort(function(a,b){ return a.sum - b.sum || a.t.name.localeCompare(b.t.name); });
 
   $("#ticker").innerHTML = rows.map(function(r){
     return "<tr>" +
-      '<td class="l"><span class="badge">' + esc(r.t.short) + '</span> <span class="pname">' + esc(r.t.name) + "</span></td>" +
+      '<td class="l"><span class="badge">' + esc(r.t.short) + '</span> <span style="font-weight:500">' + esc(r.t.name) + "</span></td>" +
       r.cells.map(function(c){
         if (!c) return '<td class="c"><span class="fx f3">blank</span></td>';
-        return '<td class="c">' + c.map(function(f){
-          var o = (TEAM[f.opp] || {}).short || "?";
-          return '<span class="fx ' + fdrClass(f.d) + '">' + (f.home ? o : o.toLowerCase()) +
-                 ' <small>' + (f.home ? "H" : "A") + "</small></span>";
-        }).join(" ") + "</td>";
+        return '<td class="c">' + c.map(fxChip).join(" ") + "</td>";
       }).join("") +
-      '<td class="mono" style="font-weight:600">' + r.sum + "</td>" +
-    "</tr>";
+      '<td class="mono" style="font-weight:600">' + r.sum + "</td></tr>";
   }).join("");
-  $("#tickerSec").hidden = false;
+  $("#fixtures").hidden = false;
 }
 
-/* ---------- render: injuries -------------------------------------------- */
+/* ---------- injuries ---------- */
 function renderInjuries(){
   var byTeam = {};
-  S.players.filter(function(p){ return p.status !== "a" && (p.news || p.status !== "n"); })
+  S.players.filter(function(p){ return p.status !== "a"; })
     .forEach(function(p){ (byTeam[p.team] = byTeam[p.team] || []).push(p); });
-
   var keys = Object.keys(byTeam);
-  if (!keys.length){ $("#injSec").hidden = true; return; }
-  $("#injSec").hidden = false;
-
+  if (!keys.length){ $("#news").hidden = true; return; }
+  $("#news").hidden = false;
   var rank = { u:0, i:1, s:2, d:3, n:4 };
-  $("#clubs").innerHTML = keys
-    .sort(function(a, b){ return byTeam[b].length - byTeam[a].length; })
-    .map(function(tid){
-      var t = TEAM[tid] || {};
-      var items = byTeam[tid].sort(function(a, b){
-        return (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || b.owned - a.owned;
-      });
-      return '<div class="club"><div class="club-h"><span class="badge">' + esc(t.short || "") + "</span><b>" +
-        esc(t.name || "") + '</b><span class="n">' + items.length + "</span></div><ul class=\"ilist\">" +
-        items.map(function(p){
-          return "<li><span class=\"nm\">" + esc(p.name) + "</span> " + statusTag(p) +
-            (p.owned >= 3 ? ' <span class="psub">' + p.owned.toFixed(1) + "% owned</span>" : "") +
-            '<span class="ds">' + esc(p.news || "No detail given") + "</span></li>";
-        }).join("") + "</ul></div>";
-    }).join("");
+  $("#clubs").innerHTML = keys.sort(function(a,b){ return byTeam[b].length - byTeam[a].length; }).map(function(tid){
+    var t = TEAM[tid] || {};
+    var items = byTeam[tid].sort(function(a,b){
+      return ((rank[a.status] == null ? 9 : rank[a.status]) - (rank[b.status] == null ? 9 : rank[b.status])) || b.owned - a.owned;
+    });
+    return '<div class="club"><div class="club-h"><span class="badge">' + esc(t.short || "") + "</span><b>" +
+      esc(t.name || "") + '</b><span class="n">' + items.length + '</span></div><ul class="ilist">' +
+      items.map(function(p){
+        return '<li><span class="nm" data-pid="' + p.id + '">' + esc(p.name) + "</span> " + statusTag(p) +
+          (p.owned >= 3 ? '<span class="psub">' + p.owned.toFixed(1) + "% owned</span>" : "") +
+          '<span class="ds">' + esc(p.news || "No detail given") + "</span></li>";
+      }).join("") + "</ul></div>";
+  }).join("");
 }
 
-/* ---------- wiring ------------------------------------------------------ */
+/* ---------- charts ---------- */
+function barChart(data, opts){
+  opts = opts || {};
+  var w = opts.width || 400, h = opts.height || 92, pad = 18, gap = 3;
+  var maxBar = opts.maxBar || 40;
+  if (!data.length) return "";
+  var max = Math.max.apply(null, data.map(function(d){ return d.value; }));
+  if (max <= 0) max = 1;
+
+  // Cap bar width so a chart with one or two points shows columns, not slabs,
+  // then centre the group in the available width.
+  var bw = Math.min(maxBar, (w - (data.length - 1) * gap) / data.length);
+  var span = data.length * bw + (data.length - 1) * gap;
+  var x0 = (w - span) / 2;
+  var plot = h - pad - (opts.values ? 14 : 6);
+
+  var bars = data.map(function(d, i){
+    var bh = Math.max(2, (d.value / max) * plot);
+    var x = x0 + i * (bw + gap), y = h - pad - bh;
+    var r = Math.min(4, bw / 2, bh / 2);
+    return '<rect class="cbar" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
+      '" height="' + bh.toFixed(1) + '" rx="' + r.toFixed(1) + '"' +
+      ' data-t="' + esc(d.label + " · " + d.value + (opts.unit || "")) + '"></rect>' +
+      (opts.labels ? '<text class="lbl" x="' + (x + bw / 2).toFixed(1) + '" y="' + (h - 5) +
+        '" text-anchor="middle">' + esc(d.short || d.label) + "</text>" : "") +
+      (opts.values ? '<text class="val" x="' + (x + bw / 2).toFixed(1) + '" y="' + (y - 4).toFixed(1) +
+        '" text-anchor="middle">' + d.value + "</text>" : "");
+  }).join("");
+
+  return '<svg class="chart" viewBox="0 0 ' + w + " " + h + '" role="img" style="max-height:' + h + 'px">' +
+    '<line class="axis" x1="' + Math.max(0, x0 - 6) + '" y1="' + (h - pad) + '" x2="' +
+      Math.min(w, x0 + span + 6) + '" y2="' + (h - pad) + '"/>' + bars + "</svg>";
+}
+
+/* ---------- drawer ---------- */
+var lastFocus = null;
+function openDrawer(o){
+  lastFocus = document.activeElement;
+  $("#dName").textContent = o.title;
+  $("#dMeta").textContent = o.meta || "";
+  $("#dBody").innerHTML = o.body;
+  $("#scrim").classList.add("on");
+  $("#drawer").classList.add("on");
+  $("#drawer").focus();
+  bindTips();
+}
+function closeDrawer(){
+  $("#scrim").classList.remove("on");
+  $("#drawer").classList.remove("on");
+  hideTip();
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
+function bindTips(){
+  $$("#dBody .cbar").forEach(function(b){
+    b.addEventListener("mouseenter", function(ev){
+      var r = b.getBoundingClientRect();
+      showTip(esc(b.dataset.t), r.left + r.width / 2, r.top);
+    });
+    b.addEventListener("mouseleave", hideTip);
+  });
+}
+
+function openPlayer(pid){
+  var p = BYID[pid]; if (!p) return;
+  var t = TEAM[p.team] || {}, det = D[pid];
+  var b = "";
+
+  if (p.news) b += '<div class="newsbox">' + esc(p.news) + "</div>";
+
+  b += '<div class="dblock"><h4>This season</h4><div class="kv">' +
+    '<div><div class="k">Price</div><div class="v">£' + p.price.toFixed(1) + "</div></div>" +
+    '<div><div class="k">Points</div><div class="v">' + p.pts + "</div></div>" +
+    '<div><div class="k">Per game</div><div class="v">' + p.ppg.toFixed(1) + "</div></div>" +
+    '<div><div class="k">Owned</div><div class="v">' + p.owned.toFixed(1) + "%</div></div>" +
+    '<div><div class="k">Minutes</div><div class="v">' + p.mins + "</div></div>" +
+    '<div><div class="k">Desk</div><div class="v">' + p.score.toFixed(1) + "</div></div>" +
+  "</div></div>";
+
+  b += '<div class="dblock"><h4>Underlying numbers</h4><div class="kv">' +
+    '<div><div class="k">xG</div><div class="v">' + p.xG.toFixed(2) + "</div></div>" +
+    '<div><div class="k">xA</div><div class="v">' + p.xA.toFixed(2) + "</div></div>" +
+    '<div><div class="k">xGI / 90</div><div class="v">' + p.xGI90.toFixed(2) + "</div></div>" +
+    '<div><div class="k">Goals</div><div class="v">' + p.goals + "</div></div>" +
+    '<div><div class="k">Assists</div><div class="v">' + p.assists + "</div></div>" +
+    '<div><div class="k">Bonus</div><div class="v">' + p.bonus + "</div></div>" +
+  "</div></div>";
+
+  if (det && det.gws && det.gws.length){
+    var gwData = det.gws.map(function(g){
+      return { label:"GW" + g.gw, short:String(g.gw), value:g.pts };
+    });
+    b += '<div class="dblock"><h4>Points by gameweek, this season</h4>' +
+      barChart(gwData, { width:400, height:92, labels:true, unit:" pts" }) + "</div>";
+  }
+
+  if (det && det.past && det.past.length){
+    var seasons = det.past.slice(-6);
+    b += '<div class="dblock"><h4>Previous seasons</h4>' +
+      barChart(seasons.map(function(s){
+        return { label:s.season, short:s.season.slice(0, 2) + "/" + s.season.slice(-2), value:s.pts };
+      }), { width:400, height:104, labels:true, values:true, unit:" pts" }) +
+      '<table class="seasons">' + seasons.slice().reverse().map(function(s){
+        return "<tr><td>" + esc(s.season) + "</td><td>" + s.mins + " mins · " + s.goals + "g " + s.assists +
+          "a · ended £" + s.endCost.toFixed(1) + "</td><td>" + s.pts + "</td></tr>";
+      }).join("") + "</table></div>";
+  } else if (!S.hasDetails){
+    b += '<div class="dblock"><h4>Previous seasons</h4><p class="empty-note">History is fetched for the squad and the ' +
+      "most-owned players only. Run the refresh workflow once more if this player was recently added.</p></div>";
+  } else if (!det){
+    b += '<div class="dblock"><h4>Previous seasons</h4><p class="empty-note">Not among the players history was pulled for. ' +
+      "It covers your squad plus the most-owned 180.</p></div>";
+  } else {
+    b += '<div class="dblock"><h4>Previous seasons</h4><p class="empty-note">No Premier League seasons on record &mdash; ' +
+      "new to the league.</p></div>";
+  }
+
+  var nf = nextFixtures(p.team, 5);
+  b += '<div class="dblock"><h4>Next ' + nf.length + ' fixtures</h4><div class="fxlist">' +
+    (nf.length ? nf.map(function(f){ return fxChip(f); }).join("") : '<span class="empty-note">No fixtures scheduled.</span>') +
+  "</div></div>";
+
+  b += '<div class="dblock"><h4>Price movement</h4><div class="kv">' +
+    '<div><div class="k">Started</div><div class="v">£' + p.priceStart.toFixed(1) + "</div></div>" +
+    '<div><div class="k">Now</div><div class="v">£' + p.price.toFixed(1) + "</div></div>" +
+    '<div><div class="k">Pressure</div><div class="v" style="color:var(--' +
+      (p.price_.ratio > 0 ? "up" : p.price_.ratio < 0 ? "down" : "text-2") + ')">' +
+      (p.price_.net > 0 ? "+" : "") + p.price_.net.toLocaleString() + "</div></div>" +
+  "</div></div>";
+
+  openDrawer({
+    title: p.full || p.name,
+    meta: (t.name || "") + " · " + p.pos + " · £" + p.price.toFixed(1) + "m" + (MYIDS[p.id] ? " · in your squad" : ""),
+    body: b
+  });
+}
+
+/* delegate every player click on the page */
+document.addEventListener("click", function(ev){
+  var el = ev.target.closest("[data-pid]");
+  if (el && !el.hasAttribute("data-buy")) openPlayer(parseInt(el.dataset.pid, 10));
+});
+$("#dClose").addEventListener("click", closeDrawer);
+$("#scrim").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDrawer(); });
+
+/* ---------- wiring ---------- */
 function wire(){
   $$("#posSeg button").forEach(function(b){
     b.setAttribute("aria-pressed", String(b.dataset.pos === prefs.pos));
     b.addEventListener("click", function(){
       prefs.pos = b.dataset.pos;
       $$("#posSeg button").forEach(function(x){ x.setAttribute("aria-pressed", String(x === b)); });
-      savePrefs(prefs); renderTargets();
+      savePrefs(); renderTargets();
     });
   });
-
   var s = $("#search"); s.value = prefs.q;
-  s.addEventListener("input", function(){ prefs.q = s.value; savePrefs(prefs); renderTargets(); });
-
+  s.addEventListener("input", function(){ prefs.q = s.value; savePrefs(); renderTargets(); });
   var mp = $("#maxPrice"); mp.value = prefs.maxPrice;
   mp.addEventListener("input", function(){
-    var v = parseFloat(mp.value);
-    prefs.maxPrice = Number.isFinite(v) ? v : 16;
-    savePrefs(prefs); renderTargets();
+    var v = parseFloat(mp.value); prefs.maxPrice = Number.isFinite(v) ? v : 16; savePrefs(); renderTargets();
   });
-
-  [["#hideFlag","hideFlag"],["#hideOwned","hideOwned"],["#fitOnly","fitOnly"]].forEach(function(pair){
+  [["#hideFlag","hideFlag"],["#hideOwned","hideOwned"]].forEach(function(pair){
     var el = $(pair[0]); el.checked = !!prefs[pair[1]];
-    el.addEventListener("change", function(){ prefs[pair[1]] = el.checked; savePrefs(prefs); renderTargets(); });
+    el.addEventListener("change", function(){ prefs[pair[1]] = el.checked; savePrefs(); renderTargets(); });
   });
-
   $$("thead th.s").forEach(function(th){
     th.addEventListener("click", function(){
       var k = th.dataset.k;
@@ -717,48 +1307,48 @@ function wire(){
       else { prefs.sort = k; prefs.dir = (k === "name") ? 1 : -1; }
       $$("thead th.s").forEach(function(x){ x.removeAttribute("aria-sort"); });
       th.setAttribute("aria-sort", prefs.dir === 1 ? "ascending" : "descending");
-      savePrefs(prefs); renderTargets();
+      savePrefs(); renderTargets();
     });
   });
 }
 
-/* ---------- boot -------------------------------------------------------- */
-fetch("data/snapshot.json?v=" + Date.now())
-  .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-  .then(function(data){
-    S = data;
-    S.teams.forEach(function(t){ TEAM[t.id] = t; });
-    S.players.forEach(function(p){ BYID[p.id] = p; });
-    if (S.entry && S.entry.picks) S.entry.picks.forEach(function(p){ MYIDS[p.id] = p; });
+/* ---------- boot ---------- */
+var bust = "?v=" + Date.now();
+Promise.all([
+  fetch("data/snapshot.json" + bust).then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }),
+  fetch("data/details.json" + bust).then(function(r){ return r.ok ? r.json() : {}; }).catch(function(){ return {}; })
+]).then(function(res){
+  S = res[0]; D = res[1] || {};
+  S.teams.forEach(function(t){ TEAM[t.id] = t; });
+  S.players.forEach(function(p){ BYID[p.id] = p; });
+  if (S.entry && S.entry.picks) S.entry.picks.forEach(function(p){ MYIDS[p.id] = p; });
 
-    computeScores(S.players);
-    renderHeader();
-    renderSquad();
-    renderAlerts();
-    renderPrices();
-    renderTicker();
-    renderInjuries();
-    $("#targetSec").hidden = false;
-    wire();
-    renderTargets();
+  computeScores(S.players);
+  renderHeader();
+  renderSquad();
+  renderAlerts();
+  initPlanner();
+  renderShelves();
+  renderPrices();
+  renderTicker();
+  renderInjuries();
+  $("#targets").hidden = false;
+  wire();
+  renderTargets();
 
-    var age = Date.now() - new Date(S.generatedAt).getTime();
-    var mins = Math.round(age / 60000);
-    $("#stamp").textContent = "updated " + (mins < 60 ? mins + " min ago" : Math.round(mins / 60) + "h ago");
-  })
-  .catch(function(err){
-    $("#deadline").textContent = "No data yet";
-    $("#deadlineSub").textContent = "The refresh job has not produced a snapshot.";
-    $("#squadNote").textContent = "";
-    $("#squad").innerHTML =
-      '<div class="setup"><h3>Waiting on the first data refresh</h3>' +
-      "<p>The page loaded, but <code>data/snapshot.json</code> is not there yet. On a brand-new repo that is normal " +
-      "&mdash; the job has not run.</p><ul class=\"steps\">" +
-      '<li><span class="sn">1</span><div>Open the <b>Actions</b> tab in your GitHub repo.</div></li>' +
-      '<li><span class="sn">2</span><div>Pick <b>Refresh FPL data</b>, then <b>Run workflow</b>.</div></li>' +
-      '<li><span class="sn">3</span><div>Give it a minute, then reload this page.</div></li>' +
-      "</ul><p style=\"margin-top:14px;font-size:12.5px;color:var(--text-3)\">Error: " + esc(err.message) + "</p></div>";
-  });
+  var mins = Math.round((Date.now() - new Date(S.generatedAt).getTime()) / 60000);
+  $("#stamp").textContent = "updated " + (mins < 60 ? mins + " min ago" : Math.round(mins / 60) + "h ago");
+}).catch(function(err){
+  $("#deadline").textContent = "No data yet";
+  $("#deadlineSub").textContent = "The refresh job has not produced a snapshot.";
+  $("#squadCard").innerHTML =
+    '<div class="setup"><h3>Waiting on the first data refresh</h3>' +
+    "<p>The page loaded, but <code>data/snapshot.json</code> is not there yet. On a new repo that is normal.</p><ul class=\"steps\">" +
+    '<li><span class="sn">1</span><div>Open the <b>Actions</b> tab in your repo.</div></li>' +
+    '<li><span class="sn">2</span><div>Pick <b>Refresh FPL data</b>, then <b>Run workflow</b>.</div></li>' +
+    '<li><span class="sn">3</span><div>Give it a minute, then reload.</div></li>' +
+    '</ul><p style="margin-top:14px;font-size:12.5px;color:var(--text-3)">Error: ' + esc(err.message) + "</p></div>";
+});
 })();
 </script>
 </body>
