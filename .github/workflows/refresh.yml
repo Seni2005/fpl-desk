@@ -1,0 +1,45 @@
+name: Refresh FPL data
+
+on:
+  schedule:
+    # Every 3 hours. FPL prices change around 01:30 UTC, so the 02:00 run
+    # catches them within half an hour.
+    - cron: "0 */3 * * *"
+  workflow_dispatch: # lets you refresh on demand from the Actions tab
+  push:
+    branches: [main]
+    paths:
+      - "config.json"
+      - "scripts/fetch.mjs"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Fetch FPL data
+        run: node scripts/fetch.mjs
+
+      - name: Commit snapshot if it changed
+        run: |
+          git config user.name  "fpl-desk bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/snapshot.json
+          if git diff --staged --quiet; then
+            echo "No change in snapshot — nothing to commit."
+          else
+            git commit -m "Refresh FPL data ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+            git push
+          fi
