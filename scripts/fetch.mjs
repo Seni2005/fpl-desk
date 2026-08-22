@@ -19,6 +19,7 @@ const UA = "Mozilla/5.0 (compatible; fpl-desk/1.0; +https://github.com)";
 const FIXTURE_HORIZON = 6; // gameweeks shown in the ticker
 const DETAIL_COUNT = 180;  // players we pull full season-by-season history for
 const DETAIL_CONCURRENCY = 5; // be a polite guest on someone else's API
+const LEAGUE_LIMIT = 8;    // private mini-leagues we pull standings for
 
 async function get(path) {
   const url = `${API}${path}`;
@@ -164,6 +165,7 @@ async function main() {
       chance: el.chance_of_playing_next_round,
       form: num(el.form),
       pts: el.total_points || 0,
+      gwPts: el.event_points || 0,
       ppg: num(el.points_per_game),
       epNext: num(el.ep_next),
       owned: num(el.selected_by_percent),
@@ -229,8 +231,55 @@ async function main() {
           value: h.value / 10,
           bank: h.bank / 10,
         })),
+        leagues: [],
       };
       console.log(`  ${entry.name} — ${entry.picks.length} picks, rank ${entry.overallRank ?? "n/a"}`);
+
+      // ---- mini-leagues -------------------------------------------------
+      // league_type "x" is a league someone created; "s" is a system league
+      // (Overall, country, region). Only the created ones get a standings
+      // fetch — the global tables are millions deep and the rank alone is
+      // the interesting part.
+      const classic = (info.leagues && info.leagues.classic) || [];
+      const wanted = classic.filter((l) => l.league_type === "x").slice(0, LEAGUE_LIMIT);
+      const systemOnly = classic.filter((l) => l.league_type !== "x");
+
+      console.log(`Fetching standings for ${wanted.length} mini-league(s)…`);
+      for (const l of wanted) {
+        try {
+          const st = await get(`/leagues-classic/${l.id}/standings/`);
+          const results = (st.standings && st.standings.results) || [];
+          entry.leagues.push({
+            id: l.id,
+            name: l.name,
+            type: "private",
+            myRank: l.entry_rank ?? null,
+            myLastRank: l.entry_last_rank ?? null,
+            size: l.rank_count ?? results.length,
+            hasMore: !!(st.standings && st.standings.has_next),
+            standings: results.slice(0, 25).map((r) => ({
+              rank: r.rank,
+              lastRank: r.last_rank,
+              entry: r.entry,
+              team: r.entry_name,
+              manager: r.player_name,
+              total: r.total,
+              gw: r.event_total,
+              isMe: r.entry === Number(config.teamId),
+            })),
+          });
+        } catch (err) {
+          console.warn(`  league ${l.id} failed: ${err.message}`);
+        }
+      }
+      for (const l of systemOnly) {
+        entry.leagues.push({
+          id: l.id, name: l.name, type: "global",
+          myRank: l.entry_rank ?? null, myLastRank: l.entry_last_rank ?? null,
+          size: l.rank_count ?? null, hasMore: true, standings: [],
+        });
+      }
+      console.log(`  ${entry.leagues.length} league(s) recorded`);
     } catch (err) {
       console.warn(`  squad fetch failed: ${err.message}`);
       entry = { error: err.message, id: config.teamId };
