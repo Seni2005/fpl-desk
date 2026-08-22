@@ -2,7 +2,13 @@
 
 A personal Fantasy Premier League planner that lives at its own URL, updates itself, and costs nothing to run.
 
-It shows your squad, flags injuries and suspensions, tracks which players are drifting toward a price rise or fall, ranks transfer targets, and lays out fixture difficulty for the next five gameweeks.
+## What's on it
+
+- **Your squad** on a pitch, in your actual formation, with the bench below — captain and vice armbands, injury pins, and price-movement arrows.
+- **Planner** — try transfers against your real budget. It counts your hits, enforces the squad rules, and tells you whether the move is worth it.
+- **Worth a look** — shortlists pulled out of the data: in form, best value, kind fixtures, differentials, budget enablers.
+- **Any player, in detail** — click a name anywhere on the page for previous-season points, this season's gameweek-by-gameweek trend, underlying numbers and upcoming fixtures.
+- **Price watch**, **transfer targets**, **fixture ticker** and the **injury board**.
 
 ## How it works
 
@@ -11,11 +17,14 @@ The FPL API sends no CORS headers, so a web page cannot call it directly from a 
 ```
 GitHub Actions (every 3 hours)
   └─ scripts/fetch.mjs  ── calls the FPL API, builds a compact snapshot
-       └─ data/snapshot.json  ── committed back to the repo
-            └─ index.html  ── reads it from the same origin, renders everything
+       ├─ data/snapshot.json  ── players, teams, fixtures, your squad
+       └─ data/details.json   ── season-by-season history
+            └─ index.html  ── reads both from the same origin, renders everything
 ```
 
-Everything the page shows is computed in your browser from that one snapshot file, so it loads instantly and works offline once cached.
+Everything the page shows is computed in your browser from those two files, so it loads instantly and works offline once cached.
+
+Season history is one API call per player, so it is pulled for your fifteen plus the 180 most-owned players rather than all 700. Click a player outside that set and the panel says so rather than inventing numbers.
 
 ## Setting it up
 
@@ -73,6 +82,12 @@ Commit. Saving that file kicks off a refresh by itself, so your squad appears wi
 - **Add it to your phone's home screen** and it behaves like an app.
 - Your filter and sort choices are remembered in your own browser. They never leave your device.
 
+## A note on the Planner's budget
+
+FPL sells a player back to you at your purchase price plus half of any rise since, rounded down. The API does not expose purchase prices without logging in, so the planner values your existing players at **today's market price**. For anyone you have held since the start that is exact; for someone who has risen since you bought them it can be optimistic by a tenth or two. If a plan lands within £0.2m of your budget, check it on the real site before committing.
+
+Free transfers are also not exposed by the public API, so there's a box in the planner header to set them yourself. It defaults to 1 and remembers what you set.
+
 ## A note on the price watch
 
 FPL does not publish the thresholds that trigger a price change. This estimates the pressure on a player from net transfers measured against how many managers own them, which is the same signal the public prediction sites use. It is a good early warning and it is not a guarantee — treat a full bar as "likely tonight", not "certain".
@@ -92,6 +107,7 @@ It knows nothing about press conferences, rotation risk in a cup week, or who ha
 | `.github/workflows/refresh.yml` | The schedule that runs the fetch |
 | `config.json` | Your team ID |
 | `data/snapshot.json` | Generated. Never edit it by hand |
+| `data/details.json` | Generated. Season-by-season history |
 
 ## Troubleshooting
 
