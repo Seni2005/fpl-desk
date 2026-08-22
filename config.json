@@ -1,4 +1,4 @@
 {
-  "teamId": null,
+  "teamId": 3176331,
   "_comment": "Put your FPL team ID here as a number, with no quotes. Find it by logging in at fantasy.premierleague.com, clicking Points, and reading the number in the address bar: /entry/1234567/event/2 -> teamId is 1234567. Saving this file triggers a refresh automatically."
 }
