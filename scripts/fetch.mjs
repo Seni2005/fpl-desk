@@ -17,6 +17,8 @@ const API = "https://fantasy.premierleague.com/api";
 const UA = "Mozilla/5.0 (compatible; fpl-desk/1.0; +https://github.com)";
 
 const FIXTURE_HORIZON = 6; // gameweeks shown in the ticker
+const DETAIL_COUNT = 180;  // players we pull full season-by-season history for
+const DETAIL_CONCURRENCY = 5; // be a polite guest on someone else's API
 
 async function get(path) {
   const url = `${API}${path}`;
@@ -237,8 +239,65 @@ async function main() {
     console.log("No teamId in config.json — skipping squad.");
   }
 
+  // ---- per-player history ------------------------------------------------
+  // element-summary is one call per player, so we pull it for the squad plus
+  // the players most likely to be looked at, rather than all 700.
+  const squadIds = entry && entry.picks ? entry.picks.map((p) => p.id) : [];
+  const ranked = players
+    .slice()
+    .sort((a, b) => (b.owned * 2 + b.pts) - (a.owned * 2 + a.pts))
+    .slice(0, DETAIL_COUNT)
+    .map((p) => p.id);
+  const detailIds = Array.from(new Set([...squadIds, ...ranked]));
+
+  console.log(`Fetching history for ${detailIds.length} players…`);
+  const details = {};
+  let done = 0;
+  const queue = detailIds.slice();
+  await Promise.all(
+    Array.from({ length: DETAIL_CONCURRENCY }, async () => {
+      while (queue.length) {
+        const pid = queue.shift();
+        try {
+          const d = await get(`/element-summary/${pid}/`);
+          details[pid] = {
+            past: (d.history_past || []).map((s) => ({
+              season: s.season_name,
+              pts: s.total_points,
+              mins: s.minutes,
+              goals: s.goals_scored,
+              assists: s.assists,
+              cs: s.clean_sheets,
+              endCost: s.end_cost / 10,
+              startCost: s.start_cost / 10,
+            })),
+            gws: (d.history || []).map((h) => ({
+              gw: h.round,
+              pts: h.total_points,
+              mins: h.minutes,
+              opp: h.opponent_team,
+              home: h.was_home,
+              bonus: h.bonus,
+              value: h.value / 10,
+            })),
+          };
+        } catch (err) {
+          console.warn(`  history for ${pid} failed: ${err.message}`);
+        }
+        done++;
+        if (done % 40 === 0) console.log(`  ${done}/${detailIds.length}`);
+      }
+    })
+  );
+  console.log(`  got history for ${Object.keys(details).length} players`);
+
+  await mkdir(join(ROOT, "data"), { recursive: true });
+  await writeFile(join(ROOT, "data", "details.json"), JSON.stringify(details));
+  console.log(`Wrote data/details.json (${Math.round(JSON.stringify(details).length / 1024)} KB)`);
+
   const snapshot = {
     generatedAt: new Date().toISOString(),
+    hasDetails: Object.keys(details).length > 0,
     season: "2026/27",
     totalManagers: totalPlayers,
     currentEvent: current ? { id: current.id, name: current.name, finished: current.finished } : null,
