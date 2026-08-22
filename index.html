@@ -18,8 +18,14 @@
   --text:#141926; --text-2:#48536a; --text-3:#7b859d;
   --accent:#3355d8; --accent-2:#5b78ec; --accent-soft:#e6ebff; --accent-line:#bac7f8;
   --turf:#1d6b45; --turf-2:#22794e; --turf-line:rgba(255,255,255,.30);
-  --d2:#18885a; --d2bg:#d5f0e2; --d3:#78829a; --d3bg:#e7ebf3;
-  --d4:#cd5f28; --d4bg:#fbe2d4; --d5:#ba3232; --d5bg:#fadad8;
+  /* Fixture difficulty: a diverging scale — vivid at both ends, neutral in the
+     middle. Contrast and colourblind separation checked; the difficulty digit
+     printed in each chip is the secondary encoding the mid tiers need. */
+  --d1:#06301b; --d1bg:#25c46d;
+  --d2:#146f49; --d2bg:#c8ecd8;
+  --d3:#5a6377; --d3bg:#e4e8f1;
+  --d4:#9c4614; --d4bg:#fbdcc9;
+  --d5:#ffffff; --d5bg:#c62828;
   --up:#18885a; --upbg:#d5f0e2; --down:#ba3232; --downbg:#fadad8;
   --warn:#a8730f; --warnbg:#fbedca; --susp:#6741ba; --suspbg:#e9e1fb;
   --sh-1:0 1px 2px rgba(20,25,38,.05);
@@ -34,8 +40,11 @@
   --text:#e9edf7; --text-2:#a2accd; --text-3:#6e7893;
   --accent:#8ea4ff; --accent-2:#6f8bff; --accent-soft:#1c2440; --accent-line:#37426f;
   --turf:#124430; --turf-2:#16523a; --turf-line:rgba(255,255,255,.16);
-  --d2:#43cf8d; --d2bg:#10301f; --d3:#828da5; --d3bg:#212939;
-  --d4:#ef8747; --d4bg:#39220f; --d5:#f0655e; --d5bg:#3b1818;
+  --d1:#06301b; --d1bg:#25c46d;
+  --d2:#52d698; --d2bg:#14382a;
+  --d3:#98a3ba; --d3bg:#262e3f;
+  --d4:#f5975c; --d4bg:#43260f;
+  --d5:#ffffff; --d5bg:#c62828;
   --up:#43cf8d; --upbg:#10301f; --down:#f0655e; --downbg:#3b1818;
   --warn:#e3b152; --warnbg:#372a10; --susp:#b198f0; --suspbg:#251e44;
   --sh-1:0 1px 2px rgba(0,0,0,.4);
@@ -48,8 +57,11 @@
   --text:#e9edf7; --text-2:#a2accd; --text-3:#6e7893;
   --accent:#8ea4ff; --accent-2:#6f8bff; --accent-soft:#1c2440; --accent-line:#37426f;
   --turf:#124430; --turf-2:#16523a; --turf-line:rgba(255,255,255,.16);
-  --d2:#43cf8d; --d2bg:#10301f; --d3:#828da5; --d3bg:#212939;
-  --d4:#ef8747; --d4bg:#39220f; --d5:#f0655e; --d5bg:#3b1818;
+  --d1:#06301b; --d1bg:#25c46d;
+  --d2:#52d698; --d2bg:#14382a;
+  --d3:#98a3ba; --d3bg:#262e3f;
+  --d4:#f5975c; --d4bg:#43260f;
+  --d5:#ffffff; --d5bg:#c62828;
   --up:#43cf8d; --upbg:#10301f; --down:#f0655e; --downbg:#3b1818;
   --warn:#e3b152; --warnbg:#372a10; --susp:#b198f0; --suspbg:#251e44;
   --sh-1:0 1px 2px rgba(0,0,0,.4);
@@ -137,17 +149,25 @@ h2{font-size:21px;font-weight:700;letter-spacing:-.022em}
 .bench-l{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
   color:var(--text-3);text-align:center;margin-bottom:10px}
 
-.pp{width:96px;background:transparent;border:none;padding:0;display:flex;flex-direction:column;align-items:center;gap:0;
-  cursor:pointer;position:relative}
+/* Card and chip sizing scale with the viewport so a five-across defence still
+   fits on a phone without clipping the fixture chips. */
+.pp{width:clamp(56px,17vw,100px);background:transparent;border:none;padding:0;
+  display:flex;flex-direction:column;align-items:center;gap:0;cursor:pointer;position:relative}
 .pp:hover .pp-n{background:var(--accent);color:#fff}
 :root[data-theme="dark"] .pp:hover .pp-n,:root:not([data-theme="light"]) .pp:hover .pp-n{color:#0a0d15}
 .pp svg{display:block;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))}
-.pp-n{font-size:11.5px;font-weight:600;background:#fff;color:#141926;border-radius:4px 4px 0 0;
-  width:100%;padding:2px 4px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+.pp-n{font-size:clamp(9px,2.5vw,11.5px);font-weight:600;background:#fff;color:#141926;border-radius:4px 4px 0 0;
+  width:100%;padding:2px 3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   margin-top:-3px;position:relative;z-index:2;transition:background .12s,color .12s}
-.pp-s{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;background:var(--accent);color:#fff;
-  border-radius:0 0 4px 4px;width:100%;padding:1px 4px;text-align:center}
+.pp-s{font-family:"IBM Plex Mono",monospace;font-size:clamp(9px,2.4vw,11px);font-weight:600;
+  background:var(--accent);color:#fff;border-radius:0 0 4px 4px;width:100%;padding:1px 3px;
+  text-align:center;position:relative;z-index:2}
+.pp-s small{font-weight:500;opacity:.75;font-size:.78em;margin-left:2px}
 :root[data-theme="dark"] .pp-s,:root:not([data-theme="light"]) .pp-s{color:#0a0d15}
+.pp-fx{display:flex;gap:2px;width:100%;margin-top:3px}
+.pp-fx .fx{flex:1 1 0;min-width:0;padding:2px 0;font-size:clamp(7.5px,2.05vw,9px);
+  border-radius:3px;letter-spacing:-.03em;overflow:hidden}
+.pp-fx .fx small{font-size:.86em;margin-left:.5px;opacity:.72}
 .pp-badges{position:absolute;top:-3px;right:6px;display:flex;flex-direction:column;gap:2px;z-index:3}
 .arm{width:17px;height:17px;border-radius:50%;background:#141926;color:#fff;font-size:9px;font-weight:700;
   display:grid;place-items:center;font-family:"IBM Plex Mono",monospace;border:1.5px solid #fff}
@@ -160,6 +180,35 @@ h2{font-size:21px;font-weight:700;letter-spacing:-.022em}
 .formation{position:absolute;top:12px;right:20px;z-index:2;font-family:"IBM Plex Mono",monospace;font-size:11px;
   font-weight:600;color:rgba(255,255,255,.85);letter-spacing:.08em}
 
+/* ---------- leagues ---------- */
+.subh{font-size:15.5px;font-weight:700;letter-spacing:-.015em}
+.lg{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:10px}
+.lgc{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;text-align:left;
+  box-shadow:var(--sh-1);display:flex;flex-direction:column;gap:5px;
+  transition:transform .12s,border-color .12s,box-shadow .12s}
+.lgc:hover{transform:translateY(-2px);border-color:var(--accent-line);box-shadow:var(--sh-2)}
+.lgc .nm{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lgc .rk{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.lgc .rk b{font-family:"IBM Plex Mono",monospace;font-size:21px;font-weight:600;letter-spacing:-.03em}
+.lgc .rk b.long{font-size:16px}
+.lgc .rk .of{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--text-3)}
+.mv{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;margin-left:auto}
+.mv.up{color:var(--up)} .mv.dn{color:var(--down)} .mv.same{color:var(--text-3)}
+.lgc .kind{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--text-3)}
+.st{width:100%;border-collapse:collapse;font-size:13px}
+.st th{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--text-3);text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600}
+.st th.l{text-align:left}
+.st td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+.st td.l{text-align:left;white-space:normal}
+.st tr:last-child td{border-bottom:none}
+.st tr.me td{background:var(--accent-soft);font-weight:600}
+.st .tm{font-weight:600}
+.st .mg{color:var(--text-3);font-size:11.5px;display:block}
+.st .rk{font-family:"IBM Plex Mono",monospace;color:var(--text-3);width:34px}
+.st .tot{font-family:"IBM Plex Mono",monospace;font-weight:600}
+
 /* ---------- generic chips ---------- */
 .badge{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;
   letter-spacing:.04em;min-width:38px;text-align:center;padding:2px 5px;border-radius:5px;
@@ -169,11 +218,15 @@ h2{font-size:21px;font-weight:700;letter-spacing:-.022em}
 .t-out{background:var(--downbg);color:var(--down)} .t-doubt{background:var(--warnbg);color:var(--warn)}
 .t-susp{background:var(--suspbg);color:var(--susp)} .t-up{background:var(--upbg);color:var(--up)}
 .t-down{background:var(--downbg);color:var(--down)}
-.fx{display:inline-block;min-width:58px;padding:4px 6px;border-radius:6px;font-family:"IBM Plex Mono",monospace;
-  font-size:11px;font-weight:600}
-.fx small{font-weight:500;opacity:.7;font-size:9.5px}
-.f2{background:var(--d2bg);color:var(--d2)} .f3{background:var(--d3bg);color:var(--d3)}
-.f4{background:var(--d4bg);color:var(--d4)} .f5{background:var(--d5bg);color:var(--d5)}
+.fx{display:inline-block;min-width:52px;padding:4px 6px;border-radius:6px;font-family:"IBM Plex Mono",monospace;
+  font-size:11px;font-weight:600;text-align:center}
+.fx small{font-weight:600;opacity:.62;font-size:9px;margin-left:2px}
+.f1{background:var(--d1bg);color:var(--d1)} .f2{background:var(--d2bg);color:var(--d2)}
+.f3{background:var(--d3bg);color:var(--d3)} .f4{background:var(--d4bg);color:var(--d4)}
+.f5{background:var(--d5bg);color:var(--d5)}
+.fdrkey{display:flex;gap:5px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--text-3);
+  font-family:"IBM Plex Mono",monospace}
+.fdrkey .fx{min-width:0;padding:2px 6px;font-size:10px}
 
 /* ---------- planner ---------- */
 .pl-head{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line-soft)}
@@ -345,13 +398,12 @@ footer{border-top:1px solid var(--line);padding-top:18px;font-size:12px;color:va
   :root{--pad:13px}
   h1{font-size:25px} .cd-v{font-size:27px} .desk-top{padding:20px 18px 16px}
   .cell{padding:12px 18px} body{padding-bottom:70px}
-  .pp{width:70px} .pp-n{font-size:10.5px} .row{gap:4px}
+  .row{gap:3px}
   .kv{grid-template-columns:repeat(2,1fr)}
-  .pitch{padding:18px 6px 12px}
+  .pitch{padding:18px 5px 12px}
 }
 @media (max-width:430px){
-  .pp{width:62px} .pp-n{font-size:9.5px} .pp-s{font-size:9.5px}
-  .row{gap:3px} .pitch{padding:16px 4px 10px}
+  .row{gap:2px} .pitch{padding:16px 3px 10px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -399,6 +451,14 @@ footer{border-top:1px solid var(--line);padding-top:18px;font-size:12px;color:va
   <section id="squad">
     <div class="sh"><h2>Your squad</h2><div class="note" id="squadNote"></div></div>
     <div class="card" id="squadCard"><div class="load">Loading&hellip;</div></div>
+    <div class="fdrkey" id="fdrKey" hidden></div>
+    <div id="leagueWrap" hidden>
+      <div class="sh" style="margin-top:12px">
+        <h3 class="subh">Your leagues</h3>
+        <div class="note" id="leagueNote"></div>
+      </div>
+      <div class="lg" id="leagues"></div>
+    </div>
   </section>
 
   <section id="planner" hidden>
@@ -581,7 +641,8 @@ $("#themeBtn").addEventListener("click", function(){
 });
 
 /* ---------- helpers ---------- */
-function fdrClass(d){ return "f" + Math.min(5, Math.max(2, Math.round(d))); }
+function fdrClass(d){ return "f" + Math.min(5, Math.max(1, Math.round(d))); }
+var FDR_WORD = { 1:"very easy", 2:"easy", 3:"even", 4:"tough", 5:"very tough" };
 function statusTag(p){
   if (p.status === "a") return "";
   if (p.status === "s") return '<span class="tag t-susp">susp</span>';
@@ -600,10 +661,14 @@ function nextFixtures(teamId, n){
   }
   return out;
 }
+/* Upper case = home, lower case = away. The trailing digit is the difficulty,
+   which doubles as the text backup for the colour. */
 function fxChip(f){
-  var o = (TEAM[f.opp] || {}).short || "?";
-  return '<span class="fx ' + fdrClass(f.d) + '">' + (f.home ? o : o.toLowerCase()) +
-         ' <small>' + (f.home ? "H" : "A") + "</small></span>";
+  var t = TEAM[f.opp] || {}, o = t.short || "?";
+  var title = (t.name || "?") + (f.home ? " (home)" : " (away)") +
+              " · difficulty " + f.d + ", " + (FDR_WORD[f.d] || "");
+  return '<span class="fx ' + fdrClass(f.d) + '" title="' + esc(title) + '">' +
+         (f.home ? o : o.toLowerCase()) + "<small>" + f.d + "</small></span>";
 }
 
 /* ---------- tooltip ---------- */
@@ -697,13 +762,24 @@ function pitchPlayer(p, pick){
   } else if (p.price_.band === "falling" || p.price_.band === "cooling"){
     badges += '<span class="pin dn">&#9660;</span>';
   }
-  var nf = nextFixtures(p.team, 1)[0];
-  var sub = nf ? ((TEAM[nf.opp] || {}).short || "?") + (nf.home ? " (H)" : " (A)") : "blank";
-  return '<button class="pp" data-pid="' + p.id + '" title="' + esc(p.full) + '">' +
+  var nf = nextFixtures(p.team, 3);
+  var pts = p.gwPts == null ? 0 : p.gwPts;
+  // captain's points are doubled (tripled under Triple Captain) on the real site
+  var mult = pick && pick.multiplier > 1 ? pick.multiplier : 1;
+  var shown = pts * mult;
+
+  var chips = "";
+  for (var i = 0; i < 3; i++){
+    chips += nf[i] ? fxChip(nf[i]) : '<span class="fx f3" title="No fixture — blank gameweek">&ndash;</span>';
+  }
+
+  return '<button class="pp" data-pid="' + p.id + '" title="' + esc(p.full) +
+      " · " + p.pts + ' points this season">' +
     (badges ? '<span class="pp-badges">' + badges + "</span>" : "") +
     shirt(p.team, 46) +
     '<span class="pp-n">' + esc(p.name) + "</span>" +
-    '<span class="pp-s">' + esc(sub) + "</span>" +
+    '<span class="pp-s">' + shown + (mult > 1 ? "<small>&times;" + mult + "</small>" : "<small>pts</small>") + "</span>" +
+    '<span class="pp-fx">' + chips + "</span>" +
   "</button>";
 }
 
@@ -711,6 +787,8 @@ function renderSquad(){
   var e = S.entry;
   if (!e || e.error || !e.picks || !e.picks.length){
     $("#squadNote").textContent = "Not connected";
+    $("#fdrKey").hidden = true;
+    $("#leagueWrap").hidden = true;
     $("#squadCard").innerHTML =
       '<div class="setup"><h3>Add your team ID to switch this on</h3>' +
       "<p>Everything else works without it. With it you also get the pitch view, the planner, and " +
@@ -737,8 +815,18 @@ function renderSquad(){
   var formation = [rows.DEF.length, rows.MID.length, rows.FWD.length].join("-");
   var chips = e.chipsUsed && e.chipsUsed.length
     ? e.chipsUsed.map(function(c){ return c.name + " (GW" + c.gw + ")"; }).join(", ") : "none used";
-  $("#squadNote").textContent = e.name + " · " + formation + " · " + e.transfersMade + " transfer" +
-    (e.transfersMade === 1 ? "" : "s") + (e.transferCost ? " (−" + e.transferCost + ")" : "") + " · chips: " + chips;
+  var gwName = S.currentEvent ? S.currentEvent.name.replace("Gameweek ", "GW") : "GW";
+  $("#squadNote").textContent = e.name + " · " + formation + " · " + gwName + " points shown · " +
+    e.transfersMade + " transfer" + (e.transfersMade === 1 ? "" : "s") +
+    (e.transferCost ? " (−" + e.transferCost + ")" : "") + " · chips: " + chips;
+
+  var key = $("#fdrKey");
+  key.hidden = false;
+  key.innerHTML = "<span>Next three fixtures</span>" +
+    [1,2,3,4,5].map(function(d){
+      return '<span class="fx f' + d + '" title="Difficulty ' + d + ' — ' + FDR_WORD[d] + '">' + d + "</span>";
+    }).join("") +
+    "<span>very easy &rarr; very tough &middot; UPPER CASE = home, lower = away</span>";
 
   var html = '<div class="pitch"><span class="formation">' + formation + "</span>";
   POS_ORDER.forEach(function(pos){
@@ -754,6 +842,96 @@ function renderSquad(){
     }).join("") + "</div></div>";
 
   $("#squadCard").innerHTML = html;
+}
+
+/* ---------- leagues ---------- */
+function ordinal(n){
+  if (n == null) return "—";
+  var s = ["th","st","nd","rd"], v = n % 100;
+  return n.toLocaleString() + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+/* Global leagues run to eight figures; keep the cards from breaking. */
+function compact(n){
+  if (n == null) return "";
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "m";
+  if (n >= 1e4) return Math.round(n / 1e3) + "k";
+  return n.toLocaleString();
+}
+function movement(rank, last){
+  if (rank == null || last == null || last === 0) return '<span class="mv same">&ndash;</span>';
+  var d = last - rank;
+  if (d > 0) return '<span class="mv up">&#9650;&#8202;' + compact(d) + "</span>";
+  if (d < 0) return '<span class="mv dn">&#9660;&#8202;' + compact(Math.abs(d)) + "</span>";
+  return '<span class="mv same">&ndash;</span>';
+}
+
+function renderLeagues(){
+  var e = S.entry;
+  var list = (e && !e.error && e.leagues) ? e.leagues : [];
+  if (!list.length){ $("#leagueWrap").hidden = true; return; }
+  $("#leagueWrap").hidden = false;
+
+  var priv = list.filter(function(l){ return l.type === "private"; });
+  var glob = list.filter(function(l){ return l.type !== "private"; });
+  var ordered = priv.concat(glob);
+
+  $("#leagueNote").textContent = priv.length
+    ? priv.length + " mini-league" + (priv.length === 1 ? "" : "s") + " · tap for the table"
+    : "global leagues only";
+
+  $("#leagues").innerHTML = ordered.map(function(l, i){
+    // ordinals read well for a mini-league you can place yourself in; a global
+    // rank in the hundreds of thousands is just a number
+    var big = l.myRank != null && l.myRank >= 1e5;
+    var rank = l.myRank == null ? "—" : big ? l.myRank.toLocaleString() : ordinal(l.myRank);
+    return '<button class="lgc" data-league="' + i + '" title="' + esc(l.name) + '">' +
+      '<span class="kind">' + (l.type === "private" ? "mini-league" : "global") + "</span>" +
+      '<span class="nm">' + esc(l.name) + "</span>" +
+      '<span class="rk"><b' + (rank.length > 7 ? ' class="long"' : "") + ">" + rank + "</b>" +
+        (l.size ? '<span class="of">of ' + compact(l.size) + "</span>" : "") +
+        movement(l.myRank, l.myLastRank) +
+      "</span></button>";
+  }).join("");
+
+  $$("#leagues [data-league]").forEach(function(btn){
+    btn.addEventListener("click", function(){ openLeague(ordered[parseInt(btn.dataset.league, 10)]); });
+  });
+}
+
+function openLeague(l){
+  if (!l) return;
+  var body;
+  if (!l.standings || !l.standings.length){
+    body = '<div class="dblock"><p class="empty-note">' +
+      (l.type === "private"
+        ? "No table yet — standings appear once a gameweek has been scored."
+        : "Global leagues run to millions of managers, so only your position is tracked here. " +
+          "Your rank is " + ordinal(l.myRank) + (l.size ? " of " + l.size.toLocaleString() : "") + ".") +
+      "</p></div>";
+  } else {
+    var meShown = l.standings.some(function(r){ return r.isMe; });
+    body = '<div class="dblock"><h4>Top ' + l.standings.length + "</h4>" +
+      '<table class="st"><thead><tr><th class="l">#</th><th class="l">Team</th><th>GW</th><th>Total</th></tr></thead><tbody>' +
+      l.standings.map(function(r){
+        return '<tr class="' + (r.isMe ? "me" : "") + '">' +
+          '<td class="l rk">' + r.rank + "</td>" +
+          '<td class="l"><span class="tm">' + esc(r.team) + '</span><span class="mg">' + esc(r.manager) + "</span></td>" +
+          '<td class="mono">' + r.gw + "</td>" +
+          '<td class="tot">' + r.total.toLocaleString() + "</td></tr>";
+      }).join("") + "</tbody></table>" +
+      (!meShown && l.myRank
+        ? '<p class="empty-note" style="margin-top:12px">You are ' + ordinal(l.myRank) +
+          ", outside the top " + l.standings.length + " shown here.</p>"
+        : "") +
+      (l.hasMore ? '<p class="empty-note" style="margin-top:8px">Only the top of the table is pulled.</p>' : "") +
+      "</div>";
+  }
+  openDrawer({
+    title: l.name,
+    meta: (l.type === "private" ? "Mini-league" : "Global") + " · you are " + ordinal(l.myRank) +
+          (l.size ? " of " + l.size.toLocaleString() : ""),
+    body: body
+  });
 }
 
 /* ---------- alerts ---------- */
@@ -1326,6 +1504,7 @@ Promise.all([
   computeScores(S.players);
   renderHeader();
   renderSquad();
+  renderLeagues();
   renderAlerts();
   initPlanner();
   renderShelves();
