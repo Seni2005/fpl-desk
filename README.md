@@ -4,7 +4,8 @@ A personal Fantasy Premier League planner that lives at its own URL, updates its
 
 ## What's on it
 
-- **Your squad** on a pitch, in your actual formation, with the bench below — captain and vice armbands, injury pins, and price-movement arrows.
+- **Your squad** on a pitch, in your actual formation, with the bench below — each player showing their gameweek points and their next three fixtures, plus captain and vice armbands, injury pins and price-movement arrows.
+- **Your leagues** — every mini-league you're in with your position and how it moved. Tap one for the table, with your row highlighted.
 - **Planner** — try transfers against your real budget. It counts your hits, enforces the squad rules, and tells you whether the move is worth it.
 - **Worth a look** — shortlists pulled out of the data: in form, best value, kind fixtures, differentials, budget enablers.
 - **Any player, in detail** — click a name anywhere on the page for previous-season points, this season's gameweek-by-gameweek trend, underlying numbers and upcoming fixtures.
@@ -81,6 +82,20 @@ Commit. Saving that file kicks off a refresh by itself, so your squad appears wi
 - **To force a refresh**, go to Actions → Refresh FPL data → Run workflow.
 - **Add it to your phone's home screen** and it behaves like an app.
 - Your filter and sort choices are remembered in your own browser. They never leave your device.
+
+## Reading the fixture chips
+
+Each chip is one fixture: the opponent's three-letter code, then the difficulty.
+
+**UPPER CASE means home, lower case means away.** So `LIV3` is home to Liverpool, `liv3` is away at Liverpool.
+
+The colours run from easiest to hardest — bright green (1), green (2), grey (3), orange (4), red (5). The digit is there so the chips still work if the colours are hard to tell apart; every chip also has a hover label spelling the fixture out in full.
+
+## Your leagues
+
+Standings are pulled for the mini-leagues you've joined — up to eight of them, top 25 each. Global tables like Overall and your country run to millions of managers, so only your position in those is tracked, not a table.
+
+If a mini-league has more than 25 members and you're further down, the page says where you actually are rather than leaving you off the list.
 
 ## A note on the Planner's budget
 
