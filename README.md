@@ -103,9 +103,31 @@ FPL sells a player back to you at your purchase price plus half of any rise sinc
 
 Free transfers are also not exposed by the public API, so there's a box in the planner header to set them yourself. It defaults to 1 and remembers what you set.
 
-## A note on the price watch
+## Reading the price watch
 
-FPL does not publish the thresholds that trigger a price change. This estimates the pressure on a player from net transfers measured against how many managers own them, which is the same signal the public prediction sites use. It is a good early warning and it is not a guarantee — treat a full bar as "likely tonight", not "certain".
+Every player with movement is listed, not just the top few. Each row carries:
+
+| Column | What it is |
+|---|---|
+| Price | What they cost right now |
+| Season | Change since the season started |
+| Progress | How close they are to the next change, signed. Positive is toward a rise |
+| Status | Steady, rising, falling, or due |
+| Owned | Share of all managers who have them |
+| Own Δ | How that ownership shifted this gameweek, in percentage points |
+| Net transfers | Transfers in minus transfers out this gameweek |
+
+The bar is anchored at zero in the middle, with a hairline on each side marking 100% — the point a change becomes likely. That lets you see how far *past* due someone is, not just that they are past it. Full width is 200%.
+
+FPL does not publish the thresholds that actually trigger a change, so progress is an estimate built from net transfers measured against ownership — the same signal the public prediction sites use. Treat "due" as likely tonight, not certain.
+
+On a phone the table drops to player, price and progress rather than scrolling sideways.
+
+## About the design
+
+Colour on this page only ever means something: fixture difficulty, price direction, and availability. Everything else is ink on paper, separated by rules rather than cards. If something is coloured, it is data.
+
+Contrast for every coloured chip was checked against a 4.5:1 target in both themes, and the difficulty chips print their number so they still read if the colours are hard to tell apart.
 
 ## A note on the Desk score
 
