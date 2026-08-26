@@ -7,7 +7,7 @@ A personal Fantasy Premier League planner that lives at its own URL, updates its
 - **Your squad** on a pitch, in your actual formation, with the bench below — each player showing their gameweek points and their next three fixtures, plus captain and vice armbands, injury pins and price-movement arrows.
 - **Your leagues** - every mini-league you're in with your position and how it moved. Tap one for the table, with your row highlighted.
 - **Planner** - try transfers against your real budget. It counts your hits, enforces the squad rules, and tells you whether the move is worth it.
-- **Worth a look** — shortlists pulled out of the data: in form, best value, kind fixtures, differentials, budget enablers.
+- **Worth a look** - shortlists pulled out of the data: in form, best value, kind fixtures, differentials, budget enablers.
 - **Any player, in detail** - click a name anywhere on the page for previous-season points, this season's gameweek-by-gameweek trend, underlying numbers and upcoming fixtures.
 - **Price watch**, **transfer targets**, **fixture ticker** and the **injury board**.
 
