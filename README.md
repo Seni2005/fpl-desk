@@ -9,11 +9,13 @@ vice, the bench order, the one transfer worth making, expected points, the hit i
 cost, how confident the recommendation is, and the biggest risk you are carrying. Every
 answer has a **Why?** that unfolds the evidence behind it.
 
+- **A gameweek banner that knows where the round is.** Red while matches are on, with the count of games played and in play; green once the round is done, counting down to the next deadline. Every recommendation on the page is tagged with the gameweek it applies to, so live points and next week's advice never get confused.
 - **Team health** — a 0-100 composite across expected points, fixtures, minutes security, value, injury risk and bench strength, with the weakest component named.
-- **Decision / Analyst modes** — Decision strips the page back to instructions. Analyst restores every table and figure. The toggle sits in the nav and is remembered.
-- **Planner** — plot transfers across the next six gameweeks, run a Plan A against a Plan B, and see which is worth more once hits are paid.
+- **Decision / Analyst modes** — Decision answers the question in plain language on clean cards, with colour-coded badges (🔥 high goal threat, 🎯 chance creator, 🚑 flagged) that each carry the number they came from. Analyst turns the same page back into an instrument: no cards, no shadows, full tables of xGI, xPts, fixture difficulty and simulated distributions. Nothing is removed in either direction — Decision folds the raw dumps away, Analyst unfolds them. The switch sits in the sticky header and is remembered between visits.
+- **Planner** — plot transfers across the next six gameweeks, run a Plan A against a Plan B, and see which is worth more once hits are paid. A first visit opens a four-step walkthrough.
+- **The formation sandbox** — the planner's editing surface is a pitch. Pick a gameweek, tap any player to get a ranked list of affordable replacements, and watch the bank update as you stage moves. Play a **Wildcard, Free Hit, Triple Captain or Bench Boost** and the projection recalculates immediately: free transfers for the week, a tripled armband, or all fifteen counting. One of each chip, one week at a time.
 - **What changed** — price moves, availability, form and ownership swings since the previous refresh, with your own players marked.
-- **Your squad** on a pitch in your actual formation, each player showing gameweek points and their next three fixtures, with captain and vice armbands, injury pins and price arrows.
+- **Your squad** on a pitch in your actual formation. While matches are on, each card carries its live score — the captain's doubled and shown with the working (`👑 24 pts` over `12 pts × 2`) — alongside a running total for the round. Once the round finishes those numbers give way to the next fixture and venue, colour-coded by difficulty. Injury pins and price arrows throughout.
 - **Your leagues** — every mini-league you're in with your position and how it moved. Tap one for the table, your row highlighted.
 - **Targets** — every player scored six ways (Overall, Short, Long, Value, Differential, Captain), each column sortable.
 - **Any player, in detail** — click a name anywhere for a breakdown of exactly why the algorithm rates him, what its main concern is, a simulated distribution for the next gameweek, previous seasons and upcoming fixtures.
@@ -24,7 +26,7 @@ answer has a **Why?** that unfolds the evidence behind it.
 The FPL API sends no CORS headers, so a web page cannot call it directly from a browser. This project gets around that by doing the fetching on GitHub's servers instead:
 
 ```
-GitHub Actions (every 3 hours)
+GitHub Actions (every 3 hours; every 15 min during weekend match windows)
   └─ scripts/fetch.mjs  ── calls the FPL API; also diffs against the previous
        │                    refresh and appends to the time series
        ├─ data/snapshot.json  ── players, teams, fixtures, your squad, leagues
@@ -44,7 +46,7 @@ touches no DOM, which means the same code runs in the browser and under `node --
 in the engine instead.
 
 ```bash
-npm test      # 45 unit tests over the engine
+npm test      # 58 unit tests over the engine
 npm run refresh   # run the fetcher locally
 ```
 
@@ -105,7 +107,8 @@ Commit. Saving that file kicks off a refresh by itself, so your squad appears wi
 
 ## Day to day
 
-- **It refreshes on its own** every three hours. FPL changes prices at about 01:30 UTC, and the 02:00 run picks that up.
+- **It refreshes on its own** every three hours, and every fifteen minutes on Saturdays and Sundays between 11:00 and 22:00 UTC, when matches are actually being played. FPL changes prices at about 01:30 UTC, and the 02:00 run picks that up.
+- **Live scores are as fresh as the last refresh, and the page says how fresh that is.** There is no server here, so the banner carries an "updated N minutes ago" stamp rather than pretending to be a live ticker. During a match window that is usually under fifteen minutes old; overnight it can be a couple of hours. The page will never show you a minute marker like `(64')`, because it cannot honestly know one.
 - **To force a refresh**, go to Actions → Refresh FPL data → Run workflow.
 - **Add it to your phone's home screen** and it behaves like an app.
 - Your filter and sort choices are remembered in your own browser. They never leave your device.
@@ -180,9 +183,28 @@ On a phone the table drops to player, price and progress rather than scrolling s
 
 ## About the design
 
-Colour on this page only ever means something: fixture difficulty, price direction, and availability. Everything else is ink on paper, separated by rules rather than cards. If something is coloured, it is data.
+The page has two personalities and the mode switch is what flips between them.
 
-Contrast for every coloured chip was checked against a 4.5:1 target in both themes, and the difficulty chips print their number so they still read if the colours are hard to tell apart.
+**Analyst** is the original rule: colour only ever means something — fixture difficulty, price direction, availability. Everything else is ink on paper, separated by rules rather than cards. No shadows, no rounded corners, no decoration. If something is coloured, it is data.
+
+**Decision** relaxes that on purpose. Answers sit on cards with a little elevation, and status badges carry colour to make a squad readable at a glance. Every badge still prints the figure it was derived from — `🔥 High goal threat` is followed by `xG/90 0.82` — so the colour is a label on a number, never a substitute for one. The raw dumps aren't deleted in Decision, only folded away; switching to Analyst unfolds them.
+
+Contrast for every coloured chip was checked against a 4.5:1 target in both themes and both modes, and the difficulty chips print their number so they still read if the colours are hard to tell apart.
+
+## Chips in the planner
+
+The four FPL chips are modelled where they change the maths:
+
+| Chip | What the planner does |
+|---|---|
+| Wildcard | That week's transfers cost nothing, and the new squad carries forward |
+| Free Hit | That week's transfers cost nothing, and the squad reverts the following week |
+| Triple Captain | The armband multiplier goes from ×2 to ×3 for that week only |
+| Bench Boost | All fifteen players count that week, not the best eleven |
+
+One of each per plan, one chip per week, and the projection recalculates the moment you tap. The chip you've spent in another week is shown disabled with the week it went into, rather than silently vanishing.
+
+Chips are planned here, not played here — the planner never touches your real team. Play the chip on the FPL site when you've decided.
 
 ## A note on the Desk score
 
