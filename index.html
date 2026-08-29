@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FPL Desk</title>
 <meta name="description" content="Squad, prices, fixtures and transfer targets for Fantasy Premier League.">
-<meta name="build" content="9">
+<meta name="build" content="10">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0B0D0E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -410,6 +410,31 @@ label.ck:hover{color:var(--ink)}
 .btn:hover:not(:disabled){background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .btn.go{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+/* ── the replacement picker's search ───────────────────────────
+   The ranked shortlist answers "who should I get". The search box
+   answers "can I have HIM", which is a different question and the
+   one you have when a name is already in your head. */
+.altsearch{display:flex;align-items:center;gap:10px;padding-bottom:10px;
+  border-bottom:1px solid var(--rule);margin-bottom:4px}
+.altsearch input{flex:1 1 auto;min-width:0;background:var(--paper-2);
+  border:1px solid var(--rule-2);border-bottom:1px solid var(--rule-2);padding:7px 10px;
+  font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink)}
+.altsearch input::placeholder{color:var(--ink-3)}
+.altsearch input:focus{outline:2px solid var(--ink);outline-offset:1px}
+/* A blocked row keeps its name and its figures and loses only its
+   button — the reason sits where the pitch would be, so you read why
+   rather than infer it. The chip is short by construction; the full
+   sentence is on hover. */
+.plist li.blocked .who,.plist li.blocked .badge{color:var(--ink-3)}
+/* a gain you cannot have is not good news, so it does not get the good-news
+   colour — the figure stays readable, the encouragement does not */
+.plist li.blocked .num.u,.plist li.blocked .num.d{color:var(--ink-3)}
+.plist li.blocked .btn[disabled]{opacity:.3;cursor:not-allowed}
+.tag.block{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.04em;
+  padding:2px 6px;border:1px solid var(--rule-2);color:var(--ink-3);white-space:nowrap;
+  cursor:help}
+.plist li.grp .lab{color:var(--ink-2)}
+
 .plist{list-style:none;margin:0;padding:0}
 .plist li{display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--rule);font-size:13.5px}
 .plist li.grp{padding:16px 0 5px;border-bottom:1px solid var(--ink-3)}
@@ -1324,6 +1349,6 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
      happily serve a cached index.html against a fresh js/, which is how you
      end up staring at an old page after a correct upload. Bump BUILD in both
      places when you ship, and the browser cannot get a mismatched pair. -->
-<script type="module" src="js/ui.js?v=9"></script>
+<script type="module" src="js/ui.js?v=10"></script>
 </body>
 </html>
