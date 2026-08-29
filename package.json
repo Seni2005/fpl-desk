@@ -1,0 +1,11 @@
+{
+  "name": "fpl-desk",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal Fantasy Premier League planning engine",
+  "scripts": {
+    "test": "node --test tests/",
+    "refresh": "node scripts/fetch.mjs"
+  }
+}
