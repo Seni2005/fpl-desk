@@ -230,6 +230,44 @@ async function main() {
 
   const fixturesByTeam = buildFixtureIndex(fixtures, boot.teams, fromEvent);
 
+  // ---- live state --------------------------------------------------------
+  // Per-fixture status for the gameweek in progress. The refresh cannot be
+  // truly live, so the interface stamps how old this is rather than implying
+  // it is current to the second.
+  const liveGw = current ? current.id : null;
+  const liveFixtures = liveGw
+    ? fixtures
+        .filter((f) => f.event === liveGw)
+        .map((f) => ({
+          id: f.id,
+          h: f.team_h, a: f.team_a,
+          kickoff: f.kickoff_time,
+          started: !!f.started,
+          finished: !!f.finished,
+          provisional: !!f.finished_provisional,
+          minutes: f.minutes || 0,
+          hScore: f.team_h_score, aScore: f.team_a_score,
+        }))
+        .sort((x, y) => new Date(x.kickoff) - new Date(y.kickoff))
+    : [];
+
+  const live = {
+    gw: liveGw,
+    deadline: current ? current.deadline_time : null,
+    finished: current ? !!current.finished : false,
+    dataChecked: current ? !!current.data_checked : false,
+    fixtures: liveFixtures,
+    started: liveFixtures.filter((f) => f.started).length,
+    inPlay: liveFixtures.filter((f) => f.started && !f.finished).length,
+    total: liveFixtures.length,
+    allFinished: liveFixtures.length > 0 && liveFixtures.every((f) => f.finished),
+    nextKickoff: (liveFixtures.find((f) => !f.started) || {}).kickoff || null,
+  };
+  console.log(
+    `Live state: GW${live.gw} — ${live.started}/${live.total} started, ${live.inPlay} in play` +
+    `${live.allFinished ? ', all finished' : ''}`
+  );
+
   const players = boot.elements.map((el) => {
     const mins = el.minutes || 0;
     const per90 = (v) => (mins > 0 ? round((num(v) * 90) / mins, 3) : 0);
@@ -438,6 +476,7 @@ async function main() {
     nextEvent: next
       ? { id: next.id, name: next.name, deadline: next.deadline_time }
       : null,
+    live,
     horizonFrom: fromEvent,
     horizon: FIXTURE_HORIZON,
     events: events
