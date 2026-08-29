@@ -51,6 +51,87 @@ async function loadConfig() {
   }
 }
 
+async function loadJson(name, fallback) {
+  try {
+    return JSON.parse(await readFile(join(ROOT, "data", name), "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Diff this refresh against the previous one.
+ *
+ * Runs here rather than in the browser because the previous snapshot is on disk
+ * at this point and about to be overwritten — the client would have no way to
+ * see what changed. The output is small enough to commit every few hours.
+ */
+function buildChanges(prev, players, teams, gw) {
+  const empty = {
+    generatedAt: new Date().toISOString(), since: null, gw,
+    priceRises: [], priceFalls: [], statusChanges: [], formMovers: [], ownershipMovers: [],
+  };
+  if (!prev || !Array.isArray(prev.players)) return empty;
+
+  const before = new Map(prev.players.map((p) => [p.id, p]));
+  const changes = { ...empty, since: prev.generatedAt };
+  const label = (p) => ({
+    id: p.id, name: p.name, team: (teams.find((t) => t.id === p.team) || {}).short || "",
+    pos: p.pos, owned: p.owned,
+  });
+
+  for (const p of players) {
+    const q = before.get(p.id);
+    if (!q) continue;
+
+    if (p.price !== q.price) {
+      const row = { ...label(p), from: q.price, to: p.price, delta: round(p.price - q.price, 1) };
+      (p.price > q.price ? changes.priceRises : changes.priceFalls).push(row);
+    }
+    if (p.status !== q.status || (p.news || "") !== (q.news || "")) {
+      changes.statusChanges.push({
+        ...label(p), from: q.status, to: p.status, news: p.news || "",
+        chance: p.chance, worse: rankStatus(p.status) > rankStatus(q.status),
+      });
+    }
+    const dForm = round(p.form - q.form, 1);
+    if (Math.abs(dForm) >= 0.8) changes.formMovers.push({ ...label(p), from: q.form, to: p.form, delta: dForm });
+
+    const dOwn = round(p.owned - q.owned, 2);
+    if (Math.abs(dOwn) >= 0.4) changes.ownershipMovers.push({ ...label(p), from: q.owned, to: p.owned, delta: dOwn });
+  }
+
+  const byOwn = (a, b) => b.owned - a.owned;
+  changes.priceRises.sort(byOwn);
+  changes.priceFalls.sort(byOwn);
+  changes.statusChanges.sort(byOwn);
+  changes.formMovers.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  changes.ownershipMovers.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  return changes;
+}
+
+/** Availability ordered worst-first so we can tell a downgrade from a recovery. */
+function rankStatus(s) {
+  return { a: 0, d: 1, s: 2, i: 3, u: 4, n: 5 }[s] ?? 9;
+}
+
+/**
+ * Append-only time series, one row per player per gameweek. Rewriting the
+ * current gameweek's row on each refresh keeps it to 38 rows a season rather
+ * than one every three hours.
+ */
+function updateTimeline(prevTimeline, players, gw) {
+  const timeline = prevTimeline && prevTimeline.players ? prevTimeline : { players: {} };
+  for (const p of players) {
+    const key = String(p.id);
+    if (!timeline.players[key]) timeline.players[key] = {};
+    timeline.players[key][String(gw)] = [p.price, p.owned, p.pts];
+  }
+  timeline.updated = new Date().toISOString();
+  timeline.latestGw = gw;
+  return timeline;
+}
+
 /**
  * Price-change pressure.
  *
@@ -110,6 +191,10 @@ function fixtureScore(list, fromEvent, span) {
 
 async function main() {
   const config = await loadConfig();
+  // read before we overwrite, so the diff has something to compare against
+  const prevSnapshot = await loadJson("snapshot.json", null);
+  const prevTimeline = await loadJson("timeline.json", null);
+
   console.log("Fetching bootstrap-static…");
   const boot = await get("/bootstrap-static/");
   console.log(`  ${boot.elements.length} players, ${boot.teams.length} teams`);
@@ -370,6 +455,19 @@ async function main() {
   await writeFile(out, JSON.stringify(snapshot));
   const kb = Math.round((await readFile(out)).length / 1024);
   console.log(`Wrote data/snapshot.json (${kb} KB)`);
+
+  const gwForHistory = current ? current.id : 1;
+  const changes = buildChanges(prevSnapshot, players, teams, gwForHistory);
+  await writeFile(join(ROOT, "data", "changes.json"), JSON.stringify(changes));
+  console.log(
+    `Wrote data/changes.json — ${changes.priceRises.length} up, ${changes.priceFalls.length} down, ` +
+    `${changes.statusChanges.length} status, ${changes.formMovers.length} form, ${changes.ownershipMovers.length} ownership`
+  );
+
+  const timeline = updateTimeline(prevTimeline, players, gwForHistory);
+  await writeFile(join(ROOT, "data", "timeline.json"), JSON.stringify(timeline));
+  const tkb = Math.round(JSON.stringify(timeline).length / 1024);
+  console.log(`Wrote data/timeline.json (${tkb} KB, through GW${gwForHistory})`);
 
   const flagged = players.filter((p) => p.status !== "a").length;
   const rising = players.filter((p) => p.price_.band === "rising").length;
