@@ -9,9 +9,9 @@ import {
   buildContext, weeklyAdvice, teamHealth, optimalXI, captainRanking,
   transferAlternatives, evaluatePlan, categorise, fixtureSwings,
   ownershipOpportunity, templateDiff, simulatePlayer,
-  gameweekState, playerTraits, CHIPS, matchSchedule,
+  gameweekState, playerTraits, CHIPS, matchSchedule, selectEntry,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB,
-} from './engine.js?v=8';
+} from './engine.js?v=9';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -743,8 +743,21 @@ function squadStatus() {
 function renderSquad() {
   const e = CTX.entry;
   if (!CTX.squad.length) {
-    $('#squadNote').textContent = 'Not connected';
     $('#fdrKey').hidden = true;
+    // Teams ARE configured, you just have not said which one you are. That is
+    // a different situation from "no team ID set up" and needs a different
+    // answer — the setup instructions would be actively confusing here.
+    if ((CTX.entries || []).length) {
+      $('#squadNote').textContent = 'no squad selected';
+      $('#squadCard').innerHTML =
+        '<div class="setup"><h3>Pick a squad to fill this in</h3>' +
+        '<p>Everything else on the page — prices, targets, fixtures, the match schedule — works without one.</p>' +
+        '<p><button class="btn go" id="pickAgain">Choose a squad</button></p></div>';
+      const pa = $('#pickAgain');
+      if (pa) pa.addEventListener('click', () => openTeamGate());
+      return;
+    }
+    $('#squadNote').textContent = 'Not connected';
     $('#squadCard').innerHTML =
       '<div class="setup"><h3>Add your team ID and this fills in</h3>' +
       '<p>The rest of the page works without it. With it you get the weekly recommendation, the pitch, the planner and your leagues.</p><ol>' +
@@ -1502,8 +1515,89 @@ function renderMatches() {
   }));
 }
 
+/* ═══════════════════════ whose team is this? ════════════════════════ */
+
+/**
+ * The chooser.
+ *
+ * Deliberately NOT remembered. Seni asked for it to ask each time, and that is
+ * the right call for a link two people share: a sticky choice on a shared
+ * machine silently shows you someone else's squad and you would not notice.
+ *
+ * A `?team=` link skips it entirely, and choosing writes that param back into
+ * the URL so the link you copy from the address bar lands where you are.
+ *
+ * Returns true if the gate is showing, so boot knows whether to hold the
+ * walkthrough back.
+ */
+function openTeamGate() {
+  const list = (CTX.entries || []).filter(Boolean);
+  const gate = $('#gate');
+  // Nothing to choose between: one manager (or none) needs no question.
+  if (list.length < 2) {
+    gate.hidden = true;
+    if (list.length === 1 && !CTX.entry) applyTeam(list[0].key, { push: false });
+    return false;
+  }
+  if (CTX.entry) { gate.hidden = true; return false; }
+
+  $('#gateList').innerHTML = list.map((e) => {
+    if (e.error) {
+      return `<button class="gate-opt bad" disabled title="${esc(e.error)}">` +
+        `<span class="gate-nm">${esc(e.label || 'Team ' + e.id)}</span>` +
+        '<span class="gate-sub">could not be loaded this refresh</span></button>';
+    }
+    return `<button class="gate-opt" data-team="${esc(e.key)}">` +
+      `<span class="gate-nm">${esc(e.label)}</span>` +
+      `<span class="gate-sub">${esc(e.name)}</span>` +
+      '<span class="gate-figs">' +
+        `<span><i class="lab">GW</i>${e.gwPoints}</span>` +
+        `<span><i class="lab">Total</i>${e.overallPoints}</span>` +
+        `<span><i class="lab">Rank</i>${compact(e.overallRank)}</span>` +
+      '</span></button>';
+  }).join('');
+
+  $$('#gateList [data-team]').forEach((b) =>
+    b.addEventListener('click', () => applyTeam(b.dataset.team)));
+  const skip = $('#gateSkip');
+  skip.onclick = () => { gate.hidden = true; maybeCoach(); };
+
+  gate.hidden = false;
+  const first = $('#gateList .gate-opt:not([disabled])');
+  if (first) first.focus();
+  return true;
+}
+
+/** Switch to a manager and re-render. No rebuild — see selectEntry. */
+function applyTeam(key, opts = {}) {
+  selectEntry(CTX, key);
+  $('#gate').hidden = true;
+  if (opts.push !== false && CTX.entry) {
+    const u = new URL(location.href);
+    u.searchParams.set('team', CTX.entry.key);
+    history.replaceState(null, '', u);
+  }
+  renderTeamTag();
+  renderAll();
+  if (opts.coach !== false) maybeCoach();
+}
+
+/** Who you are currently looking at, and the way back to the chooser. */
+function renderTeamTag() {
+  const el = $('#teamTag');
+  if (!el) return;
+  const many = (CTX.entries || []).length > 1;
+  if (!many) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = CTX.entry
+    ? `<span class="who-lab">Viewing</span><b>${esc(CTX.entry.label)}</b><span class="who-sw">change</span>`
+    : '<span class="who-lab">No team</span><b>Pick one</b>';
+  el.onclick = () => { selectEntry(CTX, false); renderTeamTag(); renderAll(); openTeamGate(); };
+}
+
 /** Everything that depends on data or mode. Called on boot and on mode change. */
 function renderAll() {
+  renderTeamTag();
   renderGwBanner();
   renderHeader();
   renderDashboard();
@@ -1540,7 +1634,10 @@ Promise.all([
 ]).then(([snap, details, changes]) => {
   DETAILS = details || {};
   CHANGES = changes;
-  CTX = buildContext(snap, DETAILS);
+  // A ?team= in the URL skips the chooser, so a direct link can go straight to
+  // one manager. Otherwise nothing is selected yet and the gate decides.
+  const asked = new URLSearchParams(location.search).get('team');
+  CTX = buildContext(snap, DETAILS, asked || false);
   CTX.teams.forEach((t) => TEAM.set(t.id, t));
 
   GW = gameweekState(CTX);
@@ -1548,7 +1645,9 @@ Promise.all([
   renderAll();
   $('#prices').hidden = false; $('#targets').hidden = false;
   wire();
-  maybeCoach();
+  // The chooser comes first: the walkthrough talks about "your squad", which
+  // means nothing until there is one.
+  if (!openTeamGate()) maybeCoach();
 
   const mins = Math.round((Date.now() - new Date(snap.generatedAt).getTime()) / 60000);
   $('#stamp').textContent = 'updated ' + (mins < 60 ? mins + ' min ago' : Math.round(mins / 60) + 'h ago');
