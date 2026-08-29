@@ -120,8 +120,12 @@ export function percentile(sorted, p) {
  * expected points in each of the next `horizon` gameweeks. Every downstream
  * feature — optimal XI, planner, captaincy, health — reads off that grid rather
  * than recomputing fixtures.
+ *
+ * `team` picks which configured manager's squad to attach. None of the work
+ * here depends on it, so switching later goes through `selectEntry` instead of
+ * calling this again.
  */
-export function buildContext(snapshot, details = {}) {
+export function buildContext(snapshot, details = {}, team = null) {
   const gwPlayed = snapshot.currentEvent ? snapshot.currentEvent.id : 1;
   const from = snapshot.horizonFrom || gwPlayed + 1;
   const horizon = Math.min(snapshot.horizon || 6, 6);
@@ -148,10 +152,18 @@ export function buildContext(snapshot, details = {}) {
     return p;
   });
 
+  // Every configured manager, in config order. Older snapshots carry a single
+  // `entry` instead, so that is normalised into the same list.
+  const entries = Array.isArray(snapshot.entries) && snapshot.entries.length
+    ? snapshot.entries
+    : snapshot.entry ? [snapshot.entry] : [];
+
   const ctx = {
     snapshot, details, players, byId, teams, gws, gwPlayed, horizon,
     totalManagers: snapshot.totalManagers || 1,
-    entry: snapshot.entry && !snapshot.entry.error ? snapshot.entry : null,
+    entries,
+    entry: null,
+    squad: [],
   };
 
   attachEffectiveOwnership(ctx);
@@ -160,10 +172,34 @@ export function buildContext(snapshot, details = {}) {
     p.score = p.scores.overall;
     p.traits = playerTraits(p);
   });
-  ctx.squad = ctx.entry && ctx.entry.picks
-    ? ctx.entry.picks.map((pk) => ({ ...pk, player: byId.get(pk.id) })).filter((x) => x.player)
-    : [];
+  selectEntry(ctx, team);
   return ctx;
+}
+
+/**
+ * Point the context at one manager's team.
+ *
+ * None of the analysis above depends on whose squad it is — the projection
+ * grid, the six scores and effective ownership are all properties of the
+ * player pool. So switching manager is a cheap swap of two fields, not a
+ * rebuild, which is what makes a team switcher instant on a phone.
+ *
+ * `key` matches on the config key or the raw entry id. Pass `false` for
+ * "no team" — every non-squad section still works without one.
+ */
+export function selectEntry(ctx, key) {
+  const list = ctx.entries || [];
+  let found = null;
+  if (key !== false && key != null) {
+    found = list.find((e) => e && (e.key === String(key) || String(e.id) === String(key))) || null;
+  } else if (key == null) {
+    found = list[0] || null;
+  }
+  ctx.entry = found && !found.error ? found : null;
+  ctx.squad = ctx.entry && ctx.entry.picks
+    ? ctx.entry.picks.map((pk) => ({ ...pk, player: ctx.byId.get(pk.id) })).filter((x) => x.player)
+    : [];
+  return ctx.entry;
 }
 
 /** Share of the season's available minutes actually played. */
