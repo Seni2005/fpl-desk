@@ -7,6 +7,7 @@ import {
   evaluatePlan, captainRanking, captainRankImpact, rankShift, fixtureSwings,
   weeklyAdvice, ownershipOpportunity, templateSquad, templateDiff,
   simulatePlayer, availability, underlyingRate, longAvailability,
+  gameweekState, playerTraits, CHIPS,
   rng, poisson, normalCdf, normalInv, percentile, clamp,
 } from '../js/engine.js';
 
@@ -514,6 +515,156 @@ test('fixture swings identify a gameweek and a direction', () => {
   }
   for (let i = 1; i < swings.length; i++) {
     assert.ok(Math.abs(swings[i - 1].shift) >= Math.abs(swings[i].shift), 'sorted by magnitude');
+  }
+});
+
+/* ─────────────────────── gameweek lifecycle ────────────────────────── */
+
+test('lifecycle reports live while matches are on, and scopes advice to the next gameweek', () => {
+  const liveCtx = buildContext(makeSnapshot({ live: 'inplay' }));
+  const st = gameweekState(liveCtx);
+  assert.equal(st.phase, 'live');
+  assert.equal(st.liveGw, 1);
+  assert.equal(st.targetGw, 2, 'advice targets the gameweek you can still change');
+  assert.ok(st.inPlay > 0 && st.inPlay <= st.total);
+  assert.match(st.detail, /GW2/, 'the detail names the gameweek the advice applies to');
+  assert.ok(Number.isFinite(st.ageMin), 'staleness is reported so the UI can be honest about it');
+});
+
+test('a finished round is settled, not upcoming, and keeps its scores', () => {
+  const st = gameweekState(ctx);
+  assert.equal(st.phase, 'settled', 'played matches are not "upcoming"');
+  assert.equal(st.targetGw, 2, 'advice still targets the week you can change');
+  assert.equal(st.scoresGw, 1, 'the squad keeps showing GW1 points until the GW2 deadline');
+  assert.match(st.detail, /All 10 matches played/);
+  assert.match(st.detail, /deadline/i, 'the next deadline is still named');
+});
+
+test('lifecycle is upcoming before anything kicks off, and offers no scores', () => {
+  const st = gameweekState(buildContext(makeSnapshot({ live: 'none' })));
+  assert.equal(st.phase, 'upcoming', 'nothing started is not live');
+  assert.equal(st.scoresGw, null, 'there are no points to show, so the UI must fall back to fixtures');
+  assert.match(st.detail, /Deadline/);
+});
+
+test('the three phases are exhaustive and ordered by what has been played', () => {
+  const phases = ['none', 'inplay', 'finished'].map(
+    (live) => gameweekState(buildContext(makeSnapshot({ live }))).phase);
+  assert.deepEqual(phases, ['upcoming', 'live', 'settled']);
+});
+
+/* ─────────────────────────── fan traits ────────────────────────────── */
+
+test('every trait carries the number behind it', () => {
+  let seen = 0;
+  for (const p of ctx.players) {
+    for (const t of p.traits) {
+      assert.ok(t.icon && t.label, 'trait is labelled');
+      assert.ok(typeof t.raw === 'string' && t.raw.length > 0, `${p.name}/${t.key} must show its raw figure`);
+      assert.ok(['good', 'warn', 'bad', 'info'].includes(t.tone), `${t.key} tone`);
+      seen++;
+    }
+    assert.ok(p.traits.length <= 4, 'traits stay to a readable handful');
+  }
+  assert.ok(seen > 100, `traits are actually generated (${seen})`);
+});
+
+test('availability trouble outranks everything else in the badge order', () => {
+  const flagged = ctx.players.filter((p) => p.status !== 'a' && p.traits.length);
+  assert.ok(flagged.length, 'fixture has flagged players');
+  for (const p of flagged) {
+    assert.ok(['out', 'ban', 'doubt'].includes(p.traits[0].key),
+      `${p.name} leads with ${p.traits[0].key}, should lead with its flag`);
+  }
+});
+
+test('a high xG forward is badged as a goal threat with the figure attached', () => {
+  const hot = ctx.players.find((p) => p.pos === 'FWD' && p.status === 'a' && p.per90.xG >= 0.45);
+  if (hot) {
+    const t = hot.traits.find((x) => x.key === 'threat');
+    assert.ok(t, `${hot.name} should be badged`);
+    assert.match(t.raw, /xG\/90/);
+  }
+});
+
+/* ──────────────────────────── chips ────────────────────────────────── */
+
+test('bench boost scores all fifteen instead of eleven', () => {
+  const gw = ctx.gws[0];
+  const plain = evaluatePlan({ weeks: [] }, ctx);
+  const boosted = evaluatePlan({ weeks: [{ gw, transfers: [], chip: 'bboost' }] }, ctx);
+  const w0 = plain.weeks[0], b0 = boosted.weeks[0];
+  assert.equal(b0.benchCounted, true);
+  assert.ok(b0.points > w0.points, `bench boost should add points (${b0.points} vs ${w0.points})`);
+
+  const squad = ctx.squad.map((s) => s.player);
+  const all15 = squad.reduce((s, p) => s + (p.proj[0] || 0), 0);
+  const best = optimalXI(squad, 0);
+  const capBonus = best.captain.proj[0];
+  assert.ok(Math.abs(b0.points - (all15 + capBonus)) < 0.02,
+    `bench boost total should be all fifteen plus the captain bonus (${b0.points} vs ${(all15 + capBonus).toFixed(2)})`);
+});
+
+test('triple captain adds exactly one more copy of the captain', () => {
+  const gw = ctx.gws[0];
+  const plain = evaluatePlan({ weeks: [] }, ctx).weeks[0];
+  const tc = evaluatePlan({ weeks: [{ gw, transfers: [], chip: '3xc' }] }, ctx).weeks[0];
+  assert.equal(tc.captainMultiplier, 3);
+  assert.equal(plain.captainMultiplier, 2);
+  const squad = ctx.squad.map((s) => s.player);
+  const cap = optimalXI(squad, 0).captain.proj[0];
+  assert.ok(Math.abs((tc.points - plain.points) - cap) < 0.02,
+    `the gap should equal one captain projection (${(tc.points - plain.points).toFixed(2)} vs ${cap.toFixed(2)})`);
+});
+
+test('wildcard makes a week of transfers free', () => {
+  const gw = ctx.gws[0];
+  const squad = ctx.squad.map((s) => s.player);
+  const mids = squad.filter((p) => p.pos === 'MID').slice(0, 3);
+  const spares = ctx.players.filter((p) => p.pos === 'MID' && p.status === 'a' && !squad.some((s) => s.id === p.id)).slice(0, 3);
+  const transfers = mids.map((m, i) => ({ out: m.id, in: spares[i].id }));
+
+  const paid = evaluatePlan({ weeks: [{ gw, transfers }] }, ctx, { startingFree: 1, freeTransfers: 1 });
+  const wc = evaluatePlan({ weeks: [{ gw, transfers, chip: 'wildcard' }] }, ctx, { startingFree: 1, freeTransfers: 1 });
+  assert.equal(paid.hits, 2 * HIT_COST, 'without the chip, two of three transfers are paid');
+  assert.equal(wc.hits, 0, 'the wildcard covers all of them');
+  assert.deepEqual(wc.weeks[0].squad.sort(), paid.weeks[0].squad.sort(), 'a wildcard keeps the new squad');
+});
+
+test('free hit reverts the squad the following week', () => {
+  const gw = ctx.gws[0];
+  const squad = ctx.squad.map((s) => s.player);
+  const mids = squad.filter((p) => p.pos === 'MID').slice(0, 3);
+  const spares = ctx.players.filter((p) => p.pos === 'MID' && p.status === 'a' && !squad.some((s) => s.id === p.id)).slice(0, 3);
+  const transfers = mids.map((m, i) => ({ out: m.id, in: spares[i].id }));
+
+  const fh = evaluatePlan({ weeks: [{ gw, transfers, chip: 'freehit' }] }, ctx, { startingFree: 1, freeTransfers: 1 });
+  assert.equal(fh.hits, 0, 'a free hit costs no points');
+  const wk0 = fh.weeks[0], wk1 = fh.weeks[1];
+  assert.ok(spares.every((s) => wk0.squad.includes(s.id)), 'the rented players play that week');
+  assert.ok(spares.every((s) => !wk1.squad.includes(s.id)), 'and are gone the next');
+  assert.ok(mids.every((m) => wk1.squad.includes(m.id)), 'the original squad comes back');
+  assert.equal(fh.endBank, ctx.entry.bank, 'the bank is restored too');
+});
+
+test('a plan cannot spend the same chip twice', () => {
+  const res = evaluatePlan({ weeks: [
+    { gw: ctx.gws[0], transfers: [], chip: 'bboost' },
+    { gw: ctx.gws[2], transfers: [], chip: 'bboost' },
+  ] }, ctx);
+  assert.ok(res.problems.some((t) => /Bench Boost is played 2 times/.test(t)), res.problems.join('; '));
+});
+
+test('an unknown chip is rejected rather than silently ignored', () => {
+  const res = evaluatePlan({ weeks: [{ gw: ctx.gws[0], transfers: [], chip: 'nonsense' }] }, ctx);
+  assert.ok(res.problems.some((t) => /unknown chip/.test(t)));
+  assert.equal(res.weeks[0].chip, null, 'and it does not take effect');
+});
+
+test('every chip is described for the interface', () => {
+  for (const key of ['wildcard', 'freehit', '3xc', 'bboost']) {
+    const c = CHIPS[key];
+    assert.ok(c && c.name && c.icon && c.blurb, `${key} needs a name, icon and explanation`);
   }
 });
 
