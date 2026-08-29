@@ -155,7 +155,11 @@ export function buildContext(snapshot, details = {}) {
   };
 
   attachEffectiveOwnership(ctx);
-  players.forEach((p) => { p.scores = playerScores(p, ctx); p.score = p.scores.overall; });
+  players.forEach((p) => {
+    p.scores = playerScores(p, ctx);
+    p.score = p.scores.overall;
+    p.traits = playerTraits(p);
+  });
   ctx.squad = ctx.entry && ctx.entry.picks
     ? ctx.entry.picks.map((pk) => ({ ...pk, player: byId.get(pk.id) })).filter((x) => x.player)
     : [];
@@ -590,7 +594,119 @@ export function transferAlternatives(outPlayer, ctx, budget, squadIds = [], limi
     .slice(0, limit);
 }
 
+/* ─────────────────────── gameweek lifecycle ────────────────────────────── */
+
+/**
+ * Which phase the gameweek is in, and — the part that actually matters — which
+ * gameweek any advice on screen applies to.
+ *
+ * While matches are being played the current gameweek is already decided, so
+ * every recommendation is really about the next one. Saying so explicitly is
+ * the difference between a useful page and a confusing one.
+ */
+export function gameweekState(ctx) {
+  const live = ctx.snapshot.live || null;
+  const cur = ctx.snapshot.currentEvent;
+  const next = ctx.snapshot.nextEvent;
+  const total = live ? live.total : 0;
+  const started = live ? live.started : 0;
+  const inPlay = live ? live.inPlay : 0;
+
+  // "live" means the round is under way: something has kicked off and the
+  // whole set has not finished yet.
+  const isLive = total > 0 && started > 0 && !live.allFinished;
+  const liveGw = live && live.gw != null ? live.gw : cur ? cur.id : null;
+  const targetGw = next ? next.id : liveGw != null ? liveGw + 1 : null;
+
+  const asOf = ctx.snapshot.generatedAt || null;
+  const ageMin = asOf ? Math.max(0, Math.round((Date.now() - new Date(asOf).getTime()) / 60000)) : null;
+
+  if (isLive) {
+    return {
+      phase: 'live', liveGw, targetGw, asOf, ageMin,
+      started, inPlay, total,
+      deadline: next ? next.deadline : null,
+      headline: `GW${liveGw} live`,
+      detail: inPlay
+        ? `${inPlay} of ${total} matches underway. Advice below is for GW${targetGw}.`
+        : `${started} of ${total} matches played. Advice below is for GW${targetGw}.`,
+    };
+  }
+
+  return {
+    phase: 'upcoming', liveGw, targetGw, asOf, ageMin,
+    started, inPlay, total,
+    deadline: next ? next.deadline : null,
+    headline: `GW${targetGw} upcoming`,
+    detail: next
+      ? `Deadline ${new Date(next.deadline).toLocaleString(undefined, {
+          weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+        })}. Everything below applies to GW${targetGw}.`
+      : `Everything below applies to GW${targetGw}.`,
+  };
+}
+
+/* ───────────────────────────── fan traits ──────────────────────────────── */
+
+/**
+ * Plain-language reads on a player, each carrying the number it came from.
+ *
+ * The point is layering, not simplification: a badge is the headline and the
+ * raw figure travels with it, so nothing is lost for someone who wants the
+ * underlying stat.
+ */
+export function playerTraits(p, limit = 4) {
+  const r = p.per90 || { xG: 0, xA: 0, xGI: 0, xGC: 0, saves: 0 };
+  const fdr = p.fixtures && p.fixtures.length
+    ? mean(p.fixtures.slice(0, 5).map((f) => (f.blank ? 4 : f.difficulty)))
+    : 3;
+  const out = [];
+  const add = (key, icon, label, tone, raw, weight) => out.push({ key, icon, label, tone, raw, weight });
+
+  if (p.status === 'i' || p.status === 'u') add('out', '🚑', 'Ruled out', 'bad', p.news || 'unavailable', 100);
+  else if (p.status === 's') add('ban', '🟥', 'Suspended', 'bad', p.news || 'suspended', 99);
+  else if (p.status === 'd') add('doubt', '⚠️', 'Fitness doubt', 'warn', `${p.chance == null ? '50' : p.chance}% chance of playing`, 98);
+
+  if (r.xG >= 0.45) add('threat', '🔥', 'High goal threat', 'good', `xG/90 ${r.xG.toFixed(2)}`, 90);
+  else if (r.xG >= 0.28) add('threat2', '⚽', 'Gets chances', 'good', `xG/90 ${r.xG.toFixed(2)}`, 60);
+
+  if (r.xA >= 0.30) add('creator', '🎯', 'Chance creator', 'good', `xA/90 ${r.xA.toFixed(2)}`, 85);
+
+  if ((p.pos === 'DEF' || p.pos === 'GKP') && r.xGC > 0 && r.xGC <= 1.05) {
+    add('cs', '🧱', 'Clean sheet odds', 'good', `xGC/90 ${r.xGC.toFixed(2)}`, 80);
+  }
+  if (p.pos === 'DEF' && r.xGI >= 0.3) add('attdef', '🚀', 'Attacking defender', 'good', `xGI/90 ${r.xGI.toFixed(2)}`, 82);
+
+  if (p.avail >= 0.9 && p.status === 'a') add('nailed', '🔒', 'Nailed on', 'good', `${Math.round(p.avail * 100)}% of minutes`, 70);
+  else if (p.avail > 0 && p.avail < 0.6) add('rotation', '🔄', 'Rotation risk', 'warn', `${Math.round(p.avail * 100)}% of minutes`, 88);
+
+  if ((p.form || 0) >= 6) add('form', '📈', 'In form', 'good', `form ${(p.form || 0).toFixed(1)}`, 75);
+  else if ((p.form || 0) <= 1.5 && p.avail > 0.5) add('cold', '📉', 'Out of form', 'warn', `form ${(p.form || 0).toFixed(1)}`, 55);
+
+  if (fdr <= 2.6) add('kind', '🗓️', 'Kind fixtures', 'good', `FDR ${fdr.toFixed(1)} next 5`, 72);
+  else if (fdr >= 4) add('tough', '🧗', 'Tough run', 'warn', `FDR ${fdr.toFixed(1)} next 5`, 68);
+
+  if (p.eo != null && p.eo < 8 && p.scores && p.scores.overall > 2.5) {
+    add('diff', '💎', 'Differential', 'info', `${p.eo.toFixed(1)}% effective ownership`, 65);
+  } else if (p.eo != null && p.eo >= 40) {
+    add('template', '🏰', 'Template pick', 'info', `${p.eo.toFixed(1)}% effective ownership`, 50);
+  }
+
+  if (p.progress >= 100) add('rise', '💰', 'Price rising', 'info', `${p.progress}% to a rise`, 62);
+  else if (p.progress <= -100) add('fall', '📉', 'Price falling', 'warn', `${Math.abs(p.progress)}% to a fall`, 64);
+
+  return out.sort((a, b) => b.weight - a.weight).slice(0, limit);
+}
+
 /* ─────────────────────── multi-week transfer plans ─────────────────────── */
+
+/** The four chips, and what each one does to a gameweek's scoring. */
+export const CHIPS = {
+  wildcard: { key: 'wildcard', name: 'Wildcard', icon: '🃏', blurb: 'Unlimited transfers this week, no hits. The squad keeps the changes.' },
+  freehit:  { key: 'freehit',  name: 'Free Hit',  icon: '🎟️', blurb: 'Unlimited transfers for this week only. The squad reverts afterwards.' },
+  '3xc':    { key: '3xc',      name: 'Triple Captain', icon: '👑', blurb: 'Your captain scores triple instead of double.' },
+  bboost:   { key: 'bboost',   name: 'Bench Boost', icon: '🪑', blurb: 'All fifteen players score, not just the eleven.' },
+};
 
 /**
  * Walks a plan gameweek by gameweek: applies each week's transfers, tracks the
@@ -609,9 +725,27 @@ export function evaluatePlan(plan, ctx, opts = {}) {
   let totalPoints = 0, totalHits = 0;
   const problems = [];
 
+  // A chip can only be played once, so a plan that spends one twice is invalid
+  // however good it looks.
+  const chipUse = {};
+  (plan.weeks || []).forEach((w) => {
+    if (!w.chip) return;
+    if (!CHIPS[w.chip]) { problems.push(`GW${w.gw}: unknown chip "${w.chip}"`); return; }
+    chipUse[w.chip] = (chipUse[w.chip] || 0) + 1;
+  });
+  Object.entries(chipUse).forEach(([c, n]) => {
+    if (n > 1) problems.push(`${CHIPS[c].name} is played ${n} times — you only have one`);
+  });
+
   ctx.gws.forEach((gw, idx) => {
     const step = (plan.weeks || []).find((w) => w.gw === gw);
     const moves = (step && step.transfers) || [];
+    const chip = step && step.chip && CHIPS[step.chip] ? step.chip : null;
+    const unlimited = chip === 'wildcard' || chip === 'freehit';
+
+    // Free Hit only rents the squad for one week, so remember what to give back.
+    const squadBefore = squad.slice();
+    const bankBefore = bank;
 
     moves.forEach((t) => {
       const outP = ctx.byId.get(t.out), inP = ctx.byId.get(t.in);
@@ -634,22 +768,37 @@ export function evaluatePlan(plan, ctx, opts = {}) {
     });
 
     const used = moves.length;
-    const paid = Math.max(0, used - banked);
+    const paid = unlimited ? 0 : Math.max(0, used - banked);
     const hit = paid * HIT_COST;
-    banked = Math.min(5, banked - Math.min(used, banked) + freePerWeek);
+    // playing a chip preserves the free transfer rather than spending it
+    if (!unlimited) banked = Math.min(5, banked - Math.min(used, banked) + freePerWeek);
+    else banked = Math.min(5, banked + freePerWeek);
 
     const players = squad.map((id) => ctx.byId.get(id)).filter(Boolean);
     const best = optimalXI(players, idx);
-    const points = best ? best.points : 0;
+
+    // Captaincy is worth an extra copy of the armband's projection — two more
+    // under Triple Captain. Bench Boost scores all fifteen instead of eleven.
+    const capMult = chip === '3xc' ? 3 : 2;
+    const capBonus = best && best.captain ? (best.captain.proj[idx] || 0) * (capMult - 1) : 0;
+    const base = chip === 'bboost'
+      ? players.reduce((s, q) => s + (q.proj[idx] || 0), 0)
+      : best ? best.points : 0;
+    const points = round(base + capBonus, 2);
 
     totalPoints += points;
     totalHits += hit;
     weeks.push({
-      gw, transfers: moves, hit, bank, points: round(points, 2),
-      net: round(points - hit, 2), formation: best ? best.formation : null,
+      gw, transfers: moves, chip, hit, bank,
+      points, net: round(points - hit, 2),
+      formation: best ? best.formation : null,
       captain: best && best.captain ? best.captain.name : null,
+      captainMultiplier: capMult,
+      benchCounted: chip === 'bboost',
       squad: squad.slice(),
     });
+
+    if (chip === 'freehit') { squad = squadBefore; bank = bankBefore; }
   });
 
   return {
@@ -659,6 +808,7 @@ export function evaluatePlan(plan, ctx, opts = {}) {
     hits: totalHits,
     net: round(totalPoints - totalHits, 2),
     endBank: bank,
+    chips: Object.keys(chipUse),
     problems,
   };
 }
