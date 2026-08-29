@@ -7,7 +7,7 @@ import {
   evaluatePlan, captainRanking, captainRankImpact, rankShift, fixtureSwings,
   weeklyAdvice, ownershipOpportunity, templateSquad, templateDiff,
   simulatePlayer, availability, underlyingRate, longAvailability,
-  gameweekState, playerTraits, CHIPS,
+  gameweekState, playerTraits, CHIPS, selectEntry,
   rng, poisson, normalCdf, normalInv, percentile, clamp,
 } from '../js/engine.js';
 
@@ -710,4 +710,70 @@ test('clamp behaves at the edges', () => {
   assert.equal(clamp(5, 0, 1), 1);
   assert.equal(clamp(-5, 0, 1), 0);
   assert.equal(clamp(0.5, 0, 1), 0.5);
+});
+
+/* ───────────────────── multiple managers, one page ─────────────────── */
+
+test('a snapshot with several managers exposes all of them', () => {
+  const c = buildContext(makeSnapshot());
+  assert.equal(c.entries.length, 2, 'both configured managers are available');
+  assert.equal(c.entry.id, 1234567, 'the first is attached by default');
+  assert.equal(c.squad.length, 15);
+});
+
+test('selectEntry swaps the squad without touching the analysis', () => {
+  const c = buildContext(makeSnapshot());
+  // capture something expensive that must NOT change when the manager does
+  const before = c.players.map((p) => p.scores.overall);
+  const first = c.squad.map((s) => s.id);
+
+  const other = selectEntry(c, '7654321');
+  assert.equal(other.id, 7654321, 'switched by key');
+  assert.equal(c.squad.length, 15, 'the new manager has a full squad');
+  assert.notDeepEqual(c.squad.map((s) => s.id), first, 'and it is a different fifteen');
+
+  const after = c.players.map((p) => p.scores.overall);
+  assert.deepEqual(after, before,
+    'projections and scores are properties of the player pool, not of whose team it is');
+});
+
+test('selectEntry matches on raw id as well as key', () => {
+  const c = buildContext(makeSnapshot());
+  assert.equal(selectEntry(c, 7654321).id, 7654321, 'a number works');
+  assert.equal(selectEntry(c, '1234567').id, 1234567, 'a string works');
+});
+
+test('an unknown team leaves no squad rather than falling back to someone else', () => {
+  const c = buildContext(makeSnapshot());
+  // Silently showing the first manager's team would be the dangerous bug here:
+  // on a shared link you would be reading someone else's squad as your own.
+  assert.equal(selectEntry(c, '9999999'), null);
+  assert.equal(c.squad.length, 0);
+});
+
+test('false means "no team", and every other section still has what it needs', () => {
+  const c = buildContext(makeSnapshot(), {}, false);
+  assert.equal(c.entry, null);
+  assert.equal(c.squad.length, 0);
+  assert.ok(c.players.length > 100, 'the player pool is untouched');
+  assert.ok(c.players[0].scores.overall >= 0, 'and still scored');
+});
+
+test('a manager whose fetch failed is offered but never selected', () => {
+  const snap = makeSnapshot();
+  snap.entries = [{ id: 55, key: '55', label: 'Broken', error: 'HTTP 404' }, snap.entries[1]];
+  const c = buildContext(snap);
+  assert.equal(c.entries.length, 2, 'the failure is still listed, so the UI can say so');
+  assert.equal(selectEntry(c, '55'), null, 'but selecting it yields no squad');
+  assert.equal(c.squad.length, 0);
+  assert.equal(selectEntry(c, '7654321').id, 7654321, 'and the working one is unaffected');
+});
+
+test('an older single-entry snapshot still works', () => {
+  const snap = makeSnapshot();
+  delete snap.entries;                       // as written before multi-team
+  const c = buildContext(snap);
+  assert.equal(c.entries.length, 1);
+  assert.equal(c.entry.id, 1234567);
+  assert.equal(c.squad.length, 15);
 });
