@@ -598,7 +598,21 @@ export function categorise(p) {
  * Ranked replacements for a player being sold, each with the reason it beat the
  * alternatives — taken from whichever factor actually drives the gap.
  */
-export function transferAlternatives(outPlayer, ctx, budget, squadIds = [], limit = 8) {
+/**
+ * Every player who could go into this slot, each carrying the reason it would
+ * or would not be legal.
+ *
+ * Nothing is filtered out. A picker that silently omits a player cannot answer
+ * "why isn't he in the list?", which is the question you actually have when
+ * you go looking for someone by name. So the wrong position, the ones you
+ * already own, the ones over budget and the ones at the club limit are all
+ * returned, each with `blocked` set to the reason — and it is the caller's job
+ * to show that reason rather than hide the row.
+ *
+ * `blocked` priority runs most-fundamental first: a striker cannot replace a
+ * defender no matter how much money you have, so position beats budget.
+ */
+export function replacementOptions(outPlayer, ctx, budget, squadIds = [], opts = {}) {
   const owned = new Set(squadIds);
   const clubCount = {};
   squadIds.forEach((id) => {
@@ -606,27 +620,83 @@ export function transferAlternatives(outPlayer, ctx, budget, squadIds = [], limi
     if (q && q.id !== outPlayer.id) clubCount[q.team] = (clubCount[q.team] || 0) + 1;
   });
   const ceiling = round(budget + outPlayer.price, 1);
+  const q = (opts.query || '').trim().toLowerCase();
 
-  return ctx.players
-    .filter((p) => p.pos === outPlayer.pos && !owned.has(p.id) && p.price <= ceiling + 1e-6 && p.status === 'a')
-    .map((p) => {
-      const gain = round(p.scores.overall - outPlayer.scores.overall, 2);
-      const reasons = [];
-      const fdrOut = mean(outPlayer.fixtures.slice(0, 5).map((f) => (f.blank ? 4 : f.difficulty)));
-      const fdrIn = mean(p.fixtures.slice(0, 5).map((f) => (f.blank ? 4 : f.difficulty)));
-      if (fdrOut - fdrIn > 0.4) reasons.push(`kinder fixtures (${fdrIn.toFixed(1)} vs ${fdrOut.toFixed(1)})`);
-      if (p.per90.xGI > outPlayer.per90.xGI * 1.25 && p.per90.xGI > 0.25) reasons.push(`higher xGI/90 (${p.per90.xGI.toFixed(2)})`);
-      if (p.avail > outPlayer.avail + 0.15) reasons.push(`safer minutes (${Math.round(p.avail * 100)}%)`);
-      if (p.scores.value > outPlayer.scores.value * 1.15) reasons.push(`better value at £${p.price.toFixed(1)}`);
-      if (p.eo < 10 && p.scores.overall > outPlayer.scores.overall) reasons.push(`low ownership at ${p.eo.toFixed(1)}%`);
-      return {
-        player: p, gain,
-        spend: round(p.price - outPlayer.price, 1),
-        atClubLimit: (clubCount[p.team] || 0) >= MAX_PER_CLUB,
-        reason: reasons.slice(0, 2).join(', ') || 'higher projection',
-      };
-    })
-    .sort((a, b) => b.gain - a.gain)
+  const rows = [];
+  for (const p of ctx.players) {
+    if (p.id === outPlayer.id) continue;
+    if (q) {
+      const t = ctx.teams.get(p.team) || {};
+      const hay = `${p.full || ''} ${p.name} ${t.name || ''} ${t.short || ''} ${p.pos}`.toLowerCase();
+      if (hay.indexOf(q) === -1) continue;
+    } else if (p.pos !== outPlayer.pos) {
+      continue;                       // the ranked list stays like-for-like
+    }
+
+    const short = round(p.price - ceiling, 1);
+    const club = (ctx.teams.get(p.team) || {}).short || 'club';
+    // `blockedText` is a chip, so it must stay short enough not to wrap;
+    // `blockedWhy` is the full sentence for the tooltip.
+    let blocked = null, blockedText = null, blockedWhy = null, fixable = false;
+    if (p.pos !== outPlayer.pos) {
+      blocked = 'position';
+      blockedText = `${p.pos}, not ${outPlayer.pos}`;
+      blockedWhy = `FPL only allows like-for-like swaps — a ${p.pos} cannot replace a ${outPlayer.pos}.`;
+    } else if (owned.has(p.id)) {
+      blocked = 'owned';
+      blockedText = 'already yours';
+      blockedWhy = 'He is already in this squad.';
+    } else if ((clubCount[p.team] || 0) >= MAX_PER_CLUB) {
+      blocked = 'club';
+      blockedText = `${MAX_PER_CLUB} from ${club}`;
+      blockedWhy = `You already have ${MAX_PER_CLUB} players from ${club}, which is the limit. Sell one first.`;
+      fixable = true;
+    } else if (short > 1e-6) {
+      blocked = 'budget';
+      blockedText = `£${short.toFixed(1)}m short`;
+      blockedWhy = `He costs £${p.price.toFixed(1)}m and you have £${ceiling.toFixed(1)}m for this slot.`;
+      fixable = true;
+    }
+
+    const gain = round(p.scores.overall - outPlayer.scores.overall, 2);
+    const reasons = [];
+    const fdrOut = mean(outPlayer.fixtures.slice(0, 5).map((f) => (f.blank ? 4 : f.difficulty)));
+    const fdrIn = mean(p.fixtures.slice(0, 5).map((f) => (f.blank ? 4 : f.difficulty)));
+    if (fdrOut - fdrIn > 0.4) reasons.push(`kinder fixtures (${fdrIn.toFixed(1)} vs ${fdrOut.toFixed(1)})`);
+    if (p.per90.xGI > outPlayer.per90.xGI * 1.25 && p.per90.xGI > 0.25) reasons.push(`higher xGI/90 (${p.per90.xGI.toFixed(2)})`);
+    if (p.avail > outPlayer.avail + 0.15) reasons.push(`safer minutes (${Math.round(p.avail * 100)}%)`);
+    if (p.scores.value > outPlayer.scores.value * 1.15) reasons.push(`better value at £${p.price.toFixed(1)}`);
+    if (p.eo < 10 && p.scores.overall > outPlayer.scores.overall) reasons.push(`low ownership at ${p.eo.toFixed(1)}%`);
+
+    rows.push({
+      player: p, gain,
+      spend: round(p.price - outPlayer.price, 1),
+      short: short > 0 ? short : 0,
+      legal: !blocked,
+      blocked, blockedText, blockedWhy,
+      // a block you could clear yourself (money, club limit) ranks above one
+      // you cannot (wrong position), because only one of them is worth acting on
+      fixable,
+      // kept for callers written against the old shape
+      atClubLimit: blocked === 'club',
+      reason: reasons.slice(0, 2).join(', ') || 'higher projection',
+    });
+  }
+
+  // Three bands: what you can do now, what you could do after freeing something
+  // up, and what the rules will never allow. Within each, by what they add.
+  const band = (r) => (r.legal ? 0 : r.fixable ? 1 : 2);
+  rows.sort((a, b) => band(a) - band(b) || b.gain - a.gain);
+  return opts.limit ? rows.slice(0, opts.limit) : rows;
+}
+
+/**
+ * The ranked shortlist: same position, affordable, available, not owned.
+ * This is what the picker opens with — `replacementOptions` is what search uses.
+ */
+export function transferAlternatives(outPlayer, ctx, budget, squadIds = [], limit = 8) {
+  return replacementOptions(outPlayer, ctx, budget, squadIds)
+    .filter((r) => r.legal && r.player.status === 'a')
     .slice(0, limit);
 }
 
