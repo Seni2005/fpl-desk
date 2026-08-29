@@ -14,7 +14,7 @@ answer has a **Why?** that unfolds the evidence behind it.
 - **Team health** — a 0-100 composite across expected points, fixtures, minutes security, value, injury risk and bench strength, with the weakest component named.
 - **Decision / Analyst modes** — the same terminal at two densities. Decision answers the question in plain language with colour-coded badges (🔥 high goal threat, 🎯 chance creator, 🚑 flagged) that each print the number they came from. Analyst adds the full tables of xGI, xPts, fixture difficulty and simulated distributions, and unfolds every raw dump. Nothing is deleted in either direction. The switch sits in the sticky header and is remembered between visits.
 - **Planner** — plot transfers across the next six gameweeks, run a Plan A against a Plan B, and see which is worth more once hits are paid. A first visit opens a four-step walkthrough.
-- **The formation sandbox** — the planner's editing surface is a pitch. Pick a gameweek, tap any player to get a ranked list of affordable replacements, and watch the bank update as you stage moves. Play a **Wildcard, Free Hit, Triple Captain or Bench Boost** and the projection recalculates immediately: free transfers for the week, a tripled armband, or all fifteen counting. One of each chip, one week at a time.
+- **The formation sandbox** — the planner's editing surface is a pitch. Pick a gameweek, tap any player to get a ranked list of affordable replacements, **or search the whole league by name or club** for someone specific. Watch the bank update as you stage moves. Play a **Wildcard, Free Hit, Triple Captain or Bench Boost** and the projection recalculates immediately: free transfers for the week, a tripled armband, or all fifteen counting. One of each chip, one week at a time.
 - **What changed** — price moves, availability, form and ownership swings since the previous refresh, with your own players marked.
 - **Your squad** on a pitch in your actual formation, with its own status line saying whether the round is updating, final, or not started, and how fresh the numbers are. Each card carries its gameweek score — the captain's doubled and shown with the working (`👑 24 pts` over `12 pts × 2`) — and **keeps it until the next deadline**, with the next three fixtures colour-coded underneath the whole time. Injury pins and price arrows throughout.
 - **Your leagues** — every mini-league you're in with your position and how it moved. Tap one for the table, your row highlighted.
@@ -48,7 +48,7 @@ touches no DOM, which means the same code runs in the browser and under `node --
 in the engine instead.
 
 ```bash
-npm test          # 66 unit tests over the engine
+npm test          # 73 unit tests over the engine
 npm run refresh   # run the fetcher locally
 npm run palette   # regenerate and re-verify the difficulty ramp
 ```
@@ -239,6 +239,27 @@ Dark charcoal by default on every machine — deliberately not wired to your OS 
 **The two modes differ by density and scope, not by style.** Decision hides the deep sections and folds the raw dumps away; Analyst restores them. Both are the same terminal. An earlier version made Decision a softer, card-based product and it read as two different apps.
 
 The fixture difficulty ramp was generated in OKLCH at fixed lightness targets so brightness descends monotonically across the five tiers. That is the accessibility guarantee: under total colour loss the ramp still reads in the right **order**, which a hue-only scale cannot do. Verified against deuteranope, protanope and tritanope simulations, with every text pair clearing 4.5:1 — and each chip still prints its difficulty digit as a second encoding.
+
+## Finding a specific player to bring in
+
+Tapping a player in the sandbox opens the picker. It leads with a ranked
+shortlist — same position, affordable, available, sorted by projected gain —
+which answers *who should I get*.
+
+The search box answers the other question: *can I have him?* It reaches every
+player in the league, by surname or by club, and **nothing is filtered out**. A
+picker that silently omits someone cannot tell you why he is missing, which is
+exactly what you want to know when you have a name in your head. So results come
+back in three bands:
+
+| Band | What it means |
+|---|---|
+| **You can make now** | Right position, affordable, under the club limit, not already yours |
+| **Blocked by money or the club limit** | Shown with how much short, or which club you are already full on — things you could clear by selling someone |
+| **The rules won't allow** | Wrong position, or already in your squad. Nothing you can do about it |
+
+Each blocked row keeps its name, price and projection and loses only its button,
+with a short chip saying why and the full sentence on hover.
 
 ## Chips in the planner
 
