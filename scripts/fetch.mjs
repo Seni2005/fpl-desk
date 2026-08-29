@@ -51,6 +51,125 @@ async function loadConfig() {
   }
 }
 
+/**
+ * The managers to fetch, from either config shape.
+ *
+ *   { "teams": [ { "name": "Seni", "id": 1234567 }, … ] }   preferred
+ *   { "teamId": 1234567 }                                    still works
+ *
+ * A bare number in the array is accepted too, since that is what people type
+ * first. `name` is only a label — the manager's real name comes from the API
+ * and is used when no label is given.
+ */
+function teamList(config) {
+  const raw = Array.isArray(config.teams) ? config.teams
+    : config.teamId ? [config.teamId] : [];
+  return raw
+    .map((t) => (typeof t === "object" && t ? t : { id: t }))
+    .map((t) => ({ id: Number(t.id), label: t.name || t.label || null }))
+    .filter((t) => Number.isFinite(t.id) && t.id > 0);
+}
+
+/** Everything about one manager: squad, season history, mini-leagues. */
+async function fetchEntry(team, current) {
+  const id = team.id;
+  try {
+    console.log(`Fetching entry ${id}…`);
+    const info = await get(`/entry/${id}/`);
+    const gw = current ? current.id : 1;
+    const picks = await get(`/entry/${id}/event/${gw}/picks/`);
+    const history = await get(`/entry/${id}/history/`);
+
+    const manager = `${info.player_first_name} ${info.player_last_name}`.trim();
+    const entry = {
+      id,
+      key: String(id),
+      label: team.label || manager || info.name,
+      name: info.name,
+      manager,
+      overallRank: info.summary_overall_rank,
+      overallPoints: info.summary_overall_points,
+      gwPoints: info.summary_event_points,
+      gwRank: info.summary_event_rank,
+      bank: (info.last_deadline_bank ?? 0) / 10,
+      squadValue: (info.last_deadline_value ?? 0) / 10,
+      pickedForGw: gw,
+      picks: (picks.picks || []).map((p) => ({
+        id: p.element,
+        slot: p.position,
+        captain: !!p.is_captain,
+        vice: !!p.is_vice_captain,
+        multiplier: p.multiplier,
+      })),
+      chipsUsed: (history.chips || []).map((c) => ({ name: c.name, gw: c.event })),
+      activeChip: picks.active_chip || null,
+      transfersMade: picks.entry_history?.event_transfers ?? 0,
+      transferCost: picks.entry_history?.event_transfers_cost ?? 0,
+      seasonHistory: (history.current || []).map((h) => ({
+        gw: h.event,
+        pts: h.points,
+        rank: h.overall_rank,
+        value: h.value / 10,
+        bank: h.bank / 10,
+      })),
+      leagues: [],
+    };
+    console.log(`  ${entry.name} (${entry.label}) — ${entry.picks.length} picks, rank ${entry.overallRank ?? "n/a"}`);
+
+    // ---- mini-leagues -------------------------------------------------
+    // league_type "x" is a league someone created; "s" is a system league
+    // (Overall, country, region). Only the created ones get a standings
+    // fetch — the global tables are millions deep and the rank alone is
+    // the interesting part.
+    const classic = (info.leagues && info.leagues.classic) || [];
+    const wanted = classic.filter((l) => l.league_type === "x").slice(0, LEAGUE_LIMIT);
+    const systemOnly = classic.filter((l) => l.league_type !== "x");
+
+    console.log(`  fetching standings for ${wanted.length} mini-league(s)…`);
+    for (const l of wanted) {
+      try {
+        const st = await get(`/leagues-classic/${l.id}/standings/`);
+        const results = (st.standings && st.standings.results) || [];
+        entry.leagues.push({
+          id: l.id,
+          name: l.name,
+          type: "private",
+          myRank: l.entry_rank ?? null,
+          myLastRank: l.entry_last_rank ?? null,
+          size: l.rank_count ?? results.length,
+          hasMore: !!(st.standings && st.standings.has_next),
+          standings: results.slice(0, 25).map((r) => ({
+            rank: r.rank,
+            lastRank: r.last_rank,
+            entry: r.entry,
+            team: r.entry_name,
+            manager: r.player_name,
+            total: r.total,
+            gw: r.event_total,
+            isMe: r.entry === id,
+          })),
+        });
+      } catch (err) {
+        console.warn(`  league ${l.id} failed: ${err.message}`);
+      }
+    }
+    for (const l of systemOnly) {
+      entry.leagues.push({
+        id: l.id, name: l.name, type: "global",
+        myRank: l.entry_rank ?? null, myLastRank: l.entry_last_rank ?? null,
+        size: l.rank_count ?? null, hasMore: true, standings: [],
+      });
+    }
+    console.log(`  ${entry.leagues.length} league(s) recorded`);
+    return entry;
+  } catch (err) {
+    // One bad team ID must not cost everyone else their squad, so the failure
+    // is recorded against that manager and the loop carries on.
+    console.warn(`  entry ${id} failed: ${err.message}`);
+    return { id, key: String(id), label: team.label || `Team ${id}`, error: err.message };
+  }
+}
+
 async function loadJson(name, fallback) {
   try {
     return JSON.parse(await readFile(join(ROOT, "data", name), "utf8"));
@@ -319,106 +438,26 @@ async function main() {
     };
   });
 
-  // ---- squad ------------------------------------------------------------
-  let entry = null;
-  if (config.teamId) {
-    try {
-      console.log(`Fetching entry ${config.teamId}…`);
-      const info = await get(`/entry/${config.teamId}/`);
-      const gw = current ? current.id : 1;
-      const picks = await get(`/entry/${config.teamId}/event/${gw}/picks/`);
-      const history = await get(`/entry/${config.teamId}/history/`);
-
-      entry = {
-        id: config.teamId,
-        name: info.name,
-        manager: `${info.player_first_name} ${info.player_last_name}`.trim(),
-        overallRank: info.summary_overall_rank,
-        overallPoints: info.summary_overall_points,
-        gwPoints: info.summary_event_points,
-        gwRank: info.summary_event_rank,
-        bank: (info.last_deadline_bank ?? 0) / 10,
-        squadValue: (info.last_deadline_value ?? 0) / 10,
-        pickedForGw: gw,
-        picks: (picks.picks || []).map((p) => ({
-          id: p.element,
-          slot: p.position,
-          captain: !!p.is_captain,
-          vice: !!p.is_vice_captain,
-          multiplier: p.multiplier,
-        })),
-        chipsUsed: (history.chips || []).map((c) => ({ name: c.name, gw: c.event })),
-        activeChip: picks.active_chip || null,
-        transfersMade: picks.entry_history?.event_transfers ?? 0,
-        transferCost: picks.entry_history?.event_transfers_cost ?? 0,
-        seasonHistory: (history.current || []).map((h) => ({
-          gw: h.event,
-          pts: h.points,
-          rank: h.overall_rank,
-          value: h.value / 10,
-          bank: h.bank / 10,
-        })),
-        leagues: [],
-      };
-      console.log(`  ${entry.name} — ${entry.picks.length} picks, rank ${entry.overallRank ?? "n/a"}`);
-
-      // ---- mini-leagues -------------------------------------------------
-      // league_type "x" is a league someone created; "s" is a system league
-      // (Overall, country, region). Only the created ones get a standings
-      // fetch — the global tables are millions deep and the rank alone is
-      // the interesting part.
-      const classic = (info.leagues && info.leagues.classic) || [];
-      const wanted = classic.filter((l) => l.league_type === "x").slice(0, LEAGUE_LIMIT);
-      const systemOnly = classic.filter((l) => l.league_type !== "x");
-
-      console.log(`Fetching standings for ${wanted.length} mini-league(s)…`);
-      for (const l of wanted) {
-        try {
-          const st = await get(`/leagues-classic/${l.id}/standings/`);
-          const results = (st.standings && st.standings.results) || [];
-          entry.leagues.push({
-            id: l.id,
-            name: l.name,
-            type: "private",
-            myRank: l.entry_rank ?? null,
-            myLastRank: l.entry_last_rank ?? null,
-            size: l.rank_count ?? results.length,
-            hasMore: !!(st.standings && st.standings.has_next),
-            standings: results.slice(0, 25).map((r) => ({
-              rank: r.rank,
-              lastRank: r.last_rank,
-              entry: r.entry,
-              team: r.entry_name,
-              manager: r.player_name,
-              total: r.total,
-              gw: r.event_total,
-              isMe: r.entry === Number(config.teamId),
-            })),
-          });
-        } catch (err) {
-          console.warn(`  league ${l.id} failed: ${err.message}`);
-        }
-      }
-      for (const l of systemOnly) {
-        entry.leagues.push({
-          id: l.id, name: l.name, type: "global",
-          myRank: l.entry_rank ?? null, myLastRank: l.entry_last_rank ?? null,
-          size: l.rank_count ?? null, hasMore: true, standings: [],
-        });
-      }
-      console.log(`  ${entry.leagues.length} league(s) recorded`);
-    } catch (err) {
-      console.warn(`  squad fetch failed: ${err.message}`);
-      entry = { error: err.message, id: config.teamId };
-    }
-  } else {
-    console.log("No teamId in config.json — skipping squad.");
+  // ---- squads -----------------------------------------------------------
+  // One entry per configured manager. The heavy shared data above is fetched
+  // once no matter how many people are listed; each extra manager costs three
+  // calls plus one per mini-league.
+  const entries = [];
+  for (const team of teamList(config)) {
+    const e = await fetchEntry(team, current);
+    if (e) entries.push(e);
   }
+  if (!teamList(config).length) console.log("No teams in config.json — skipping squads.");
 
+  // Older deployed pages read snapshot.entry. Keeping it pointed at the first
+  // manager means a stale cached page degrades to single-team rather than
+  // breaking outright.
+  const entry = entries[0] || null;
   // ---- per-player history ------------------------------------------------
   // element-summary is one call per player, so we pull it for the squad plus
   // the players most likely to be looked at, rather than all 700.
-  const squadIds = entry && entry.picks ? entry.picks.map((p) => p.id) : [];
+  // every configured manager's squad, so each of them gets full history
+  const squadIds = entries.flatMap((e) => (e.picks || []).map((p) => p.id));
   const ranked = players
     .slice()
     .sort((a, b) => (b.owned * 2 + b.pts) - (a.owned * 2 + a.pts))
@@ -490,6 +529,8 @@ async function main() {
     teams,
     fixtures: fixturesByTeam,
     players,
+    entries,
+    // kept for older cached pages, which read snapshot.entry
     entry,
   };
 
