@@ -612,38 +612,54 @@ export function gameweekState(ctx) {
   const started = live ? live.started : 0;
   const inPlay = live ? live.inPlay : 0;
 
-  // "live" means the round is under way: something has kicked off and the
-  // whole set has not finished yet.
-  const isLive = total > 0 && started > 0 && !live.allFinished;
   const liveGw = live && live.gw != null ? live.gw : cur ? cur.id : null;
   const targetGw = next ? next.id : liveGw != null ? liveGw + 1 : null;
 
   const asOf = ctx.snapshot.generatedAt || null;
   const ageMin = asOf ? Math.max(0, Math.round((Date.now() - new Date(asOf).getTime()) / 60000)) : null;
 
-  if (isLive) {
-    return {
-      phase: 'live', liveGw, targetGw, asOf, ageMin,
-      started, inPlay, total,
-      deadline: next ? next.deadline : null,
+  /* Three phases, not two.
+   *
+   *   upcoming  nothing in this round has kicked off. There are no scores to
+   *             show, so cards carry fixtures.
+   *   live      something has kicked off and the round is not complete.
+   *   settled   every match is played, but the next deadline has not passed —
+   *             which in FPL is most of the week. This phase used to be folded
+   *             into "upcoming", so the moment the last match ended the
+   *             gameweek points vanished from the squad. They are the first
+   *             thing anyone wants to see after a round; they stay. */
+  const phase = started === 0 || total === 0 ? 'upcoming'
+    : live.allFinished ? 'settled' : 'live';
+  // the round whose points the squad should display, null when there are none
+  const scoresGw = phase === 'upcoming' ? null : liveGw;
+
+  const deadlineText = next
+    ? new Date(next.deadline).toLocaleString(undefined, {
+        weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+      })
+    : null;
+  const base = { liveGw, targetGw, scoresGw, asOf, ageMin, started, inPlay, total,
+    deadline: next ? next.deadline : null, deadlineText };
+
+  if (phase === 'live') {
+    return { ...base, phase,
       headline: `GW${liveGw} live`,
       detail: inPlay
         ? `${inPlay} of ${total} matches underway. Advice below is for GW${targetGw}.`
-        : `${started} of ${total} matches played. Advice below is for GW${targetGw}.`,
-    };
+        : `${started} of ${total} matches played. Advice below is for GW${targetGw}.` };
   }
-
-  return {
-    phase: 'upcoming', liveGw, targetGw, asOf, ageMin,
-    started, inPlay, total,
-    deadline: next ? next.deadline : null,
+  if (phase === 'settled') {
+    return { ...base, phase,
+      headline: `GW${liveGw} final`,
+      detail: `All ${total} matches played.` +
+        (deadlineText ? ` GW${targetGw} deadline ${deadlineText}.` : '') +
+        ` Advice below is for GW${targetGw}.` };
+  }
+  return { ...base, phase,
     headline: `GW${targetGw} upcoming`,
-    detail: next
-      ? `Deadline ${new Date(next.deadline).toLocaleString(undefined, {
-          weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
-        })}. Everything below applies to GW${targetGw}.`
-      : `Everything below applies to GW${targetGw}.`,
-  };
+    detail: deadlineText
+      ? `Deadline ${deadlineText}. Everything below applies to GW${targetGw}.`
+      : `Everything below applies to GW${targetGw}.` };
 }
 
 /* ───────────────────────────── fan traits ──────────────────────────────── */
@@ -1031,4 +1047,88 @@ export function templateDiff(ctx) {
     exposureGap: round(missing.reduce((s, p) => s + p.eo, 0), 1),
     overlap: template.length ? Math.round(((template.length - missing.length) / template.length) * 100) : 0,
   };
+}
+
+/* ══════════════════════ the match schedule ══════════════════════ */
+
+/**
+ * Every Premier League match in one gameweek, keyed by calendar day in a
+ * named time zone.
+ *
+ * Two sources, because they cover different rounds. `snapshot.live.fixtures`
+ * is the only place the round in progress appears, and it is the only place
+ * scores and minutes exist. The per-team `snapshot.fixtures` map covers the
+ * horizon ahead and is the only place fixture difficulty exists. Neither
+ * covers both, so this reads whichever applies and says nothing it cannot
+ * support — a match with no difficulty renders neutral rather than guessed.
+ *
+ * The day key is produced with Intl in the target zone rather than by
+ * slicing the ISO string, which would group by UTC date and put a Sunday
+ * 02:00 Sydney kickoff on Saturday.
+ */
+export function matchSchedule(ctx, gw, tz = 'Australia/Sydney') {
+  if (gw == null) return { gw: null, tz, days: [], count: 0 };
+  const live = ctx.snapshot.live;
+  const mine = new Set((ctx.squad || []).map((s) => s.player && s.player.team).filter(Boolean));
+
+  // difficulty, when the horizon covers this round
+  const diff = new Map();   // `${team}:${opp}` -> difficulty
+  Object.entries(ctx.snapshot.fixtures || {}).forEach(([tid, list]) => {
+    (list || []).forEach((f) => {
+      if (f.gw === gw) diff.set(`${tid}:${f.opp}`, f.d);
+    });
+  });
+
+  let raw = [];
+  if (live && live.gw === gw && live.fixtures && live.fixtures.length) {
+    raw = live.fixtures.map((f) => ({
+      id: f.id, h: f.h, a: f.a, ko: f.kickoff,
+      started: !!f.started, finished: !!f.finished,
+      minutes: f.minutes || 0, hScore: f.hScore, aScore: f.aScore,
+      dh: f.dh == null ? null : f.dh, da: f.da == null ? null : f.da,
+    }));
+  } else {
+    // Each match appears twice in the per-team map. Take the home entry so
+    // every match is emitted exactly once and h/a are unambiguous.
+    const seen = new Set();
+    Object.entries(ctx.snapshot.fixtures || {}).forEach(([tid, list]) => {
+      (list || []).forEach((f) => {
+        if (f.gw !== gw || !f.home) return;
+        const h = Number(tid), a = f.opp, key = `${h}:${a}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        raw.push({ id: key, h, a, ko: f.ko, started: false, finished: false,
+          minutes: 0, hScore: null, aScore: null });
+      });
+    });
+  }
+
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const matches = raw.map((m) => {
+    const ht = ctx.teams.get(m.h) || null;
+    const at = ctx.teams.get(m.a) || null;
+    const when = m.ko ? new Date(m.ko) : null;
+    return {
+      ...m, home: ht, away: at,
+      dayKey: when ? fmt.format(when) : 'tbc',
+      // difficulty from whichever source has it: the live block carries it for
+      // the round being played, the horizon map for the rounds ahead
+      dh: m.dh != null ? m.dh : diff.has(`${m.h}:${m.a}`) ? diff.get(`${m.h}:${m.a}`) : null,
+      da: m.da != null ? m.da : diff.has(`${m.a}:${m.h}`) ? diff.get(`${m.a}:${m.h}`) : null,
+      inPlay: !!m.started && !m.finished,
+      yours: mine.has(m.h) || mine.has(m.a),
+      yourSide: mine.has(m.h) && mine.has(m.a) ? 'both' : mine.has(m.h) ? 'h' : mine.has(m.a) ? 'a' : null,
+    };
+  }).sort((x, y) => (x.ko || '').localeCompare(y.ko || '') || x.h - y.h);
+
+  const days = [];
+  matches.forEach((m) => {
+    let d = days.find((q) => q.key === m.dayKey);
+    if (!d) { d = { key: m.dayKey, iso: m.ko, matches: [] }; days.push(d); }
+    d.matches.push(m);
+  });
+  return { gw, tz, days, count: matches.length,
+    yours: matches.filter((m) => m.yours).length };
 }
