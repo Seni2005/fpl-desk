@@ -9,6 +9,7 @@ import {
   buildContext, weeklyAdvice, teamHealth, optimalXI, captainRanking,
   transferAlternatives, evaluatePlan, categorise, fixtureSwings,
   ownershipOpportunity, templateDiff, simulatePlayer,
+  gameweekState, playerTraits, CHIPS,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB,
 } from './engine.js';
 
@@ -33,6 +34,10 @@ const ordinal = (n) => {
 };
 
 let CTX = null, CHANGES = null, DETAILS = {}, TEAM = new Map();
+/** Lifecycle of the round, and which gameweek every recommendation targets. */
+let GW = null;
+/** Which gameweek the visual sandbox is currently editing. */
+let SB_GW = null;
 
 /* ───────────────────────────── prefs ────────────────────────────────── */
 
@@ -150,6 +155,75 @@ function tick(target) {
   el.textContent = d > 0 ? `${d}d ${h}h` : `${h}h ${m}m`;
 }
 
+/* ═════════════════ gameweek lifecycle & live status ══════════════════ */
+
+/** How fresh the data is. Said plainly, because the refresh is not live. */
+function freshness() {
+  if (!GW || GW.ageMin == null) return '';
+  const m = GW.ageMin;
+  const when = m < 1 ? 'moments ago' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)}h ago`;
+  return `updated ${when}`;
+}
+
+function renderGwBanner() {
+  const bar = $('#gwbar');
+  if (!GW) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.className = 'gwbar ' + GW.phase;
+  bar.innerHTML =
+    '<i class="gwdot"></i>' +
+    `<span class="gwstate">${GW.phase === 'live' ? '● ' + esc(GW.headline) : esc(GW.headline)}</span>` +
+    `<span class="gwdetail">${esc(GW.detail)}</span>` +
+    `<span class="gwage">${esc(freshness())}</span>`;
+}
+
+/** The label that pins a recommendation to the gameweek it applies to. */
+function scopeTag(gw) {
+  return gw ? `<span class="scope">for GW${gw}</span>` : '';
+}
+
+/**
+ * The score bug. During a live round it leads with the running total; between
+ * rounds that number is history, so the bank and the deadline lead instead.
+ */
+function renderScoreBug() {
+  const el = $('#scorebug');
+  const e = CTX.entry;
+  if (!e || !CTX.squad.length) { el.innerHTML = ''; return; }
+  const live = GW && GW.phase === 'live';
+
+  const sides = [];
+  if (live) {
+    sides.push(['Played', `${GW.started}/${GW.total}`]);
+    if (GW.inPlay) sides.push(['In play', String(GW.inPlay)]);
+  }
+  sides.push(['Overall rank', compact(e.overallRank)]);
+  sides.push(['Season', String(e.overallPoints)]);
+  sides.push(['Bank', `£${e.bank.toFixed(1)}`]);
+
+  el.innerHTML =
+    '<div class="scorebug">' +
+      '<div class="bug-main">' +
+        `<span class="lab">${live ? `GW${GW.liveGw} live` : `GW${GW ? GW.liveGw : ''} final`}</span>` +
+        `<b>${e.gwPoints}</b>` +
+      '</div>' +
+      '<div class="bug-side">' +
+        sides.map(([k, v]) => `<div><span class="lab">${esc(k)}</span><b>${v}</b></div>`).join('') +
+      '</div>' +
+    '</div>';
+}
+
+/* ─────────────────────────── status badges ──────────────────────────── */
+
+/** Badge row. Each badge keeps the number it was derived from. */
+function badgeRow(traits, opts = {}) {
+  if (!traits || !traits.length) return '';
+  const max = opts.limit || traits.length;
+  return '<div class="badges">' + traits.slice(0, max).map((t) =>
+    `<span class="bdg ${t.tone}" title="${esc(t.label + ' — ' + t.raw)}">` +
+    `<i>${t.icon}</i>${esc(t.label)}<span class="raw">${esc(t.raw)}</span></span>`).join('') + '</div>';
+}
+
 /* ══════════════════ EPIC 1 — the decision dashboard ══════════════════ */
 
 let ADVICE = null;
@@ -200,16 +274,21 @@ function renderAnswers(a) {
   const rows = [];
 
   rows.push({
-    q: 'Start', a: `${a.formation}`,
+    q: 'Start', wide: true, a: `${a.formation}`,
     detail: a.xi.map((p) => `<button class="chipbtn" data-pid="${p.id}">${esc(p.name)}</button>`).join(''),
     why: `Highest-projecting legal XI of the eight formations. Together they project ` +
          `${a.xi.reduce((s, p) => s + p.proj[0], 0).toFixed(1)} points before the captain's double.`,
+    raw: a.xi.map((p) => `${esc(p.name)} ${p.proj[0].toFixed(2)}`).join(' · '),
   });
 
   if (cap) {
     const imp = cap.impact;
     rows.push({
-      q: 'Captain', a: esc(cap.player.name),
+      q: 'Captain', a: `👑 ${esc(cap.player.name)}`,
+      badges: badgeRow(cap.player.traits, { limit: 3 }),
+      raw: `xPts ${cap.xPts.toFixed(2)} · proj ${cap.player.proj[0].toFixed(2)} · xGI/90 ${cap.xGI90.toFixed(2)} · ` +
+           `minutes ${cap.minutes}% · EO ${cap.eo.toFixed(1)}%` +
+           (cap.sim ? ` · haul ${(cap.sim.pHaul * 100).toFixed(0)}% · blank ${(cap.sim.pBlank * 100).toFixed(0)}%` : ''),
       detail: `<span class="ans-sub">${cap.xPts.toFixed(1)} xPts · ${cap.profile.toLowerCase()} · ${cap.eo.toFixed(1)}% effective ownership</span>`,
       why: `Projects ${(cap.player.proj[0]).toFixed(2)} before doubling. ${cap.minutes}% projected minutes, ` +
            `${cap.xGI90.toFixed(2)} xGI/90.` +
@@ -221,11 +300,15 @@ function renderAnswers(a) {
              `and estimates captaincy share from ownership — neither is published by FPL.</span>` : ''),
     });
   }
-  if (vice) rows.push({ q: 'Vice', a: esc(vice.player.name), detail: `<span class="ans-sub">${vice.xPts.toFixed(1)} xPts if the captain does not play</span>`, why: '' });
+  if (vice) rows.push({ q: 'Vice', a: esc(vice.player.name),
+    badges: badgeRow(vice.player.traits, { limit: 2 }),
+    raw: `xPts ${vice.xPts.toFixed(2)} · minutes ${vice.minutes}% · EO ${vice.eo.toFixed(1)}%`,
+    detail: `<span class="ans-sub">${vice.xPts.toFixed(1)} xPts if the captain does not play</span>`, why: '' });
 
   rows.push({
     q: 'Bench', a: a.bench.map((p, i) => `${i + 1}. ${p.name}`).join('  '),
-    detail: '', why: 'Reserve keeper first, then the outfield three by projected points — the order they would come on.',
+    detail: '', raw: a.bench.map((p) => `${esc(p.name)} ${p.proj[0].toFixed(2)}`).join(' · '),
+    why: 'Reserve keeper first, then the outfield three by projected points — the order they would come on.',
   });
 
   if (a.transfer) {
@@ -234,6 +317,9 @@ function renderAnswers(a) {
       q: 'Transfer', a: `${esc(t.out.name)} → ${esc(t.in.name)}`,
       detail: `<span class="ans-sub">${signed(t.horizonGain)} pts over ${CTX.gws.length} GW · ` +
               `${t.spend > 0 ? `costs £${t.spend.toFixed(1)}m` : t.spend < 0 ? `frees £${Math.abs(t.spend).toFixed(1)}m` : 'no cost'}</span>`,
+      badges: badgeRow(t.in.traits, { limit: 3 }),
+      raw: `out ${esc(t.out.name)} ${t.out.scores.overall.toFixed(2)}/GW · in ${esc(t.in.name)} ${t.in.scores.overall.toFixed(2)}/GW · ` +
+           `short ${t.in.scores.short.toFixed(2)} · long ${t.in.scores.long.toFixed(2)} · value ${t.in.scores.value.toFixed(2)}`,
       why: `${esc(t.in.name)} is the best available upgrade: ${esc(t.reason)}. ` +
            `Gain of ${signed(t.perGw, 2)} points per gameweek, ${signed(t.horizonGain)} across the horizon` +
            (a.hit ? `, against a ${a.hit}-point hit.` : ' with a free transfer.'),
@@ -250,14 +336,17 @@ function renderAnswers(a) {
     rows.push({ q: 'Transfer', a: 'Roll it', detail: '<span class="ans-sub">nothing clears the bar this week</span>', why: 'No available upgrade projects enough gain to be worth making.' });
   }
 
-  if (a.risk) rows.push({ q: 'Biggest risk', a: esc(a.risk.text), detail: `<span class="ans-sub">${a.risk.kind}</span>`, why: '' });
+  if (a.risk) rows.push({ q: 'Biggest risk', scope: false, a: esc(a.risk.text),
+    badges: badgeRow(a.risk.p.traits, { limit: 2 }),
+    detail: `<span class="ans-sub">${a.risk.kind}</span>`, why: '' });
 
   $('#answers').innerHTML = rows.map((r, i) => `
-    <div class="ans">
-      <div class="ans-q lab">${esc(r.q)}</div>
-      <div class="ans-a">${r.a}${r.detail ? `<div class="ans-d">${r.detail}</div>` : ''}</div>
+    <div class="ans${r.wide ? ' wide' : ''}">
+      <div class="ans-q lab">${esc(r.q)}${r.scope === false ? '' : scopeTag(GW ? GW.targetGw : null)}</div>
+      <div class="ans-a">${r.a}${r.detail ? `<div class="ans-d">${r.detail}</div>` : ''}${r.badges || ''}</div>
       ${r.why ? `<button class="whybtn" aria-expanded="false" data-why="${i}">Why?</button>
         <div class="why" id="why${i}" hidden>${r.why}</div>` : '<span></span>'}
+      ${r.raw ? `<div class="raw-block raw">${r.raw}</div>` : ''}
     </div>`).join('');
 
   $$('#answers .whybtn').forEach((b) => b.addEventListener('click', () => {
@@ -353,11 +442,15 @@ function renderPlanner() {
         `<span class="mv-cost">${signed(i.price - o.price)}m</span>` +
         `<button class="btn tiny" data-undo="${w.gw}|${t.out}">Remove</button></div>`;
     }).join('');
+    const chip = w.chip && CHIPS[w.chip]
+      ? `<span class="wk-chip">${CHIPS[w.chip].icon} ${CHIPS[w.chip].name}</span>` : '';
     return `<div class="wk">
       <div class="wk-h"><span class="wk-gw">GW${w.gw}</span>
         <span class="wk-pts">${w.points.toFixed(1)} pts</span>
         ${w.hit ? `<span class="wk-hit">−${w.hit}</span>` : ''}
-        <span class="wk-form">${w.formation || ''}</span>
+        ${chip}
+        <span class="wk-form">${w.benchCounted ? 'all 15' : (w.formation || '')}</span>
+        ${w.captainMultiplier > 2 ? '<span class="wk-form">captain ×3</span>' : ''}
         <span class="wk-bank">£${w.bank.toFixed(1)}</span>
         <button class="btn tiny" data-addgw="${w.gw}">Add transfer</button></div>
       ${moves || '<div class="wk-none">no transfers</div>'}
@@ -367,7 +460,11 @@ function renderPlanner() {
   $$('#planCompare [data-plan]').forEach((b) => b.addEventListener('click', () => {
     prefs.activePlan = b.dataset.plan; savePrefs(); renderPlanner();
   }));
-  $$('#planWeeks [data-addgw]').forEach((b) => b.addEventListener('click', () => openPlanTransfer(Number(b.dataset.addgw))));
+  $$('#planWeeks [data-addgw]').forEach((b) => b.addEventListener('click', () => {
+    SB_GW = Number(b.dataset.addgw);
+    renderPlanner();
+    $('#sandbox').scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }));
   $$('#planWeeks [data-undo]').forEach((b) => b.addEventListener('click', () => {
     const [gw, out] = b.dataset.undo.split('|').map(Number);
     const plan = getPlans()[prefs.activePlan];
@@ -375,7 +472,119 @@ function renderPlanner() {
     if (wk) wk.transfers = wk.transfers.filter((t) => t.out !== out);
     savePrefs(); renderPlanner();
   }));
-  $('#planReset').disabled = res.weeks.every((w) => !w.transfers.length);
+  renderSandbox(res);
+  $('#planReset').disabled = res.weeks.every((w) => !w.transfers.length && !w.chip);
+}
+
+/* ══════════ EPIC 4 — visual sandbox, chips and onboarding ═══════════ */
+
+/**
+ * The pitch you can experiment on. It shows the squad as it would stand in the
+ * selected gameweek, including anything already staged, and tapping a player
+ * opens the replacement list for that week. The bank above updates as you go.
+ */
+function renderSandbox(evaluated) {
+  const box = $('#sandbox');
+  if (!CTX.squad.length) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const plan = getPlans()[prefs.activePlan];
+  if (SB_GW == null || !CTX.gws.includes(SB_GW)) SB_GW = CTX.gws[0];
+  const idx = CTX.gws.indexOf(SB_GW);
+  const week = evaluated.weeks.find((w) => w.gw === SB_GW);
+
+  $('#sbGws').innerHTML = CTX.gws.map((g) => {
+    const wk = (plan.weeks || []).find((w) => w.gw === g);
+    const moves = wk && wk.transfers ? wk.transfers.length : 0;
+    return `<button data-sbgw="${g}" aria-pressed="${g === SB_GW}"` +
+      `${wk && wk.chip ? ' class="haschip"' : ''} title="GW${g}${moves ? ` · ${moves} transfer${moves === 1 ? '' : 's'}` : ''}">GW${g}</button>`;
+  }).join('');
+
+  const bank = week ? week.bank : (CTX.entry ? CTX.entry.bank : 0);
+  $('#sbBank').textContent = `£${bank.toFixed(1)}m`;
+  $('#sbBank').className = bank < 0 ? 'd' : bank > 0 ? 'u' : '';
+
+  const staged = new Set();
+  const wkNow = (plan.weeks || []).find((w) => w.gw === SB_GW);
+  if (wkNow) wkNow.transfers.forEach((t) => staged.add(t.in));
+
+  const players = (week ? week.squad : CTX.squad.map((s) => s.id)).map((id) => CTX.byId.get(id)).filter(Boolean);
+  const best = optimalXI(players, idx);
+  const lines = { GKP: [], DEF: [], MID: [], FWD: [] };
+  if (best) best.xi.forEach((p) => lines[p.pos].push(p));
+
+  const opts = (p) => ({ swappable: true, staged: staged.has(p.id), gw: SB_GW, projIdx: idx });
+  let html = `<div class="pitch"><span class="shape">${best ? best.formation : ''}</span>`;
+  ['GKP', 'DEF', 'MID', 'FWD'].forEach((pos) => {
+    if (lines[pos].length) html += `<div class="line">${lines[pos].map((p) => manCard(p, null, opts(p))).join('')}</div>`;
+  });
+  html += '</div><div class="bench"><span class="lab">Bench</span><div class="line">' +
+    (best ? best.bench.map((p) => manCard(p, null, opts(p))).join('') : '') + '</div></div>';
+  $('#sbPitch').innerHTML = html;
+
+  const moves = wkNow && wkNow.transfers ? wkNow.transfers.length : 0;
+  $('#sbHint').innerHTML =
+    `Tap any player to swap him out of your GW${SB_GW} squad. ` +
+    (moves ? `<b>${moves} transfer${moves === 1 ? '' : 's'} staged.</b> ` : '') +
+    `<button class="linkbtn" id="coachOpen">How this works</button>`;
+
+  // chips: one of each, and only in one gameweek
+  const usedElsewhere = {};
+  (plan.weeks || []).forEach((w) => { if (w.chip && w.gw !== SB_GW) usedElsewhere[w.chip] = w.gw; });
+  $('#sbChips').innerHTML = Object.values(CHIPS).map((c) => {
+    const on = wkNow && wkNow.chip === c.key;
+    const blockedIn = usedElsewhere[c.key];
+    return `<button class="chip" data-chip="${c.key}" aria-pressed="${on}"` +
+      `${blockedIn ? ' disabled' : ''} title="${esc(c.blurb)}">` +
+      `<i>${c.icon}</i>${esc(c.name)}` +
+      (blockedIn ? `<small>GW${blockedIn}</small>` : on ? '<small>on</small>' : '') + '</button>';
+  }).join('');
+
+  $$('#sbGws [data-sbgw]').forEach((b) => b.addEventListener('click', () => {
+    SB_GW = Number(b.dataset.sbgw); renderPlanner();
+  }));
+  $$('#sbPitch [data-swapout]').forEach((b) => b.addEventListener('click', () => {
+    openReplacements(Number(b.dataset.swapout), SB_GW);
+  }));
+  $$('#sbChips [data-chip]').forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.chip;
+    const pl = getPlans()[prefs.activePlan];
+    let wk = pl.weeks.find((w) => w.gw === SB_GW);
+    if (!wk) { wk = { gw: SB_GW, transfers: [] }; pl.weeks.push(wk); pl.weeks.sort((x, y) => x.gw - y.gw); }
+    wk.chip = wk.chip === key ? null : key;
+    savePrefs(); renderPlanner();
+  }));
+  const co = $('#coachOpen');
+  if (co) co.addEventListener('click', () => openCoach(0));
+}
+
+/* ── guided walkthrough ── */
+const COACH = [
+  { t: 'Try transfers without committing', b: 'The planner is a sandbox. Nothing here touches your real team — it works out what a set of moves would be worth so you can compare before you commit.' },
+  { t: 'Pick a gameweek, then tap a player', b: 'Choose the gameweek you want to edit, then tap anyone on the pitch. You will get a ranked list of replacements you can actually afford, each with the reason it beat the others. The bank above updates as you stage moves.' },
+  { t: 'Play a chip and watch it recalculate', b: 'Wildcard and Free Hit make a week of transfers free. Triple Captain scores your armband three times instead of twice. Bench Boost counts all fifteen players. Projections update immediately.' },
+  { t: 'Run two plans against each other', b: 'Plan A and Plan B are independent. Build a different route in each, and the difference at the top tells you which is worth more once hits are paid.' },
+];
+let coachStep = 0;
+function openCoach(step) {
+  coachStep = step;
+  const c = COACH[step];
+  $('#coachStep').textContent = `Planner · step ${step + 1} of ${COACH.length}`;
+  $('#coachTitle').textContent = c.t;
+  $('#coachBody').textContent = c.b;
+  $('#coachDots').innerHTML = COACH.map((_, i) => `<i class="${i === step ? 'on' : ''}"></i>`).join('');
+  $('#coachNext').textContent = step === COACH.length - 1 ? 'Got it' : 'Next';
+  $('#coach').hidden = false;
+  $('#coachNext').focus();
+}
+function closeCoach() {
+  $('#coach').hidden = true;
+  try { localStorage.setItem('fpldesk.coached', '1'); } catch (e) { /* private mode */ }
+}
+function maybeCoach() {
+  let seen = null;
+  try { seen = localStorage.getItem('fpldesk.coached'); } catch (e) { seen = '1'; }
+  if (!seen && CTX.squad.length) openCoach(0);
 }
 
 /** Squad state at the start of a gameweek, after earlier weeks' moves. */
@@ -385,28 +594,6 @@ function squadAtGw(plan, gw) {
     (w.transfers || []).forEach((t) => { squad = squad.map((id) => (id === t.out ? t.in : id)); });
   });
   return squad;
-}
-
-function openPlanTransfer(gw) {
-  const plan = getPlans()[prefs.activePlan];
-  const squadIds = squadAtGw(plan, gw);
-  const squad = squadIds.map((id) => CTX.byId.get(id)).filter(Boolean);
-  openDrawer({
-    title: `Add a transfer in GW${gw}`,
-    meta: `${plan.name} · pick who leaves`,
-    body: `<div class="blk"><span class="lab">Your squad in GW${gw}</span><ul class="plist">` +
-      squad.sort((a, b) => a.pos.localeCompare(b.pos) || a.proj[0] - b.proj[0]).map((p) =>
-        `<li><span class="badge">${esc((TEAM.get(p.team) || {}).short || '')}</span>` +
-        `<span class="who">${esc(p.name)}</span>${statusTag(p)}${catTag(p)}` +
-        `<span class="rt"><span class="num">${p.scores.overall.toFixed(1)}</span>` +
-        `<span class="num">£${p.price.toFixed(1)}</span>` +
-        `<button class="btn go" data-sell="${p.id}|${gw}">Sell</button></span></li>`).join('') +
-      '</ul></div>',
-  });
-  $$('#dBody [data-sell]').forEach((b) => b.addEventListener('click', () => {
-    const [pid, g] = b.dataset.sell.split('|').map(Number);
-    openReplacements(pid, g);
-  }));
 }
 
 /** Ranked replacements with the reason each one beat the rest. */
@@ -455,21 +642,64 @@ function openReplacements(outId, gw) {
 
 /* ═══════════════════ existing sections, engine-backed ════════════════ */
 
-function manCard(p, pick) {
+/**
+ * A player on the pitch.
+ *
+ * The plate under the name changes with the round: while matches are on it
+ * carries the live score, doubled for the captain and shown as the working.
+ * Once the round is done that number is stale, so it gives way to the fixture
+ * the player is actually about to play.
+ */
+function manCard(p, pick, opts = {}) {
+  const live = GW && GW.phase === 'live';
+  // Real picks carry multiplier 2 (or 3 under Triple Captain). Fall back to the
+  // captain flag so a card never shows an undoubled captain score.
+  const mult = pick && pick.multiplier > 1 ? pick.multiplier : (pick && pick.captain ? 2 : 1);
+
   let pins = '';
-  if (pick && pick.captain) pins += '<span class="pin c">C</span>';
-  else if (pick && pick.vice) pins += '<span class="pin v">V</span>';
   if (p.status !== 'a') pins += `<span class="pin ${p.status === 's' ? 'susp' : p.status === 'd' ? 'doubt' : 'out'}">!</span>`;
   else if (p.progress >= 55) pins += '<span class="pin up">▲</span>';
   else if (p.progress <= -55) pins += '<span class="pin dn">▼</span>';
 
+  let armband = '';
+  if (pick && pick.captain) armband = '<span class="armband">👑 C</span>';
+  else if (pick && pick.vice) armband = '<span class="armband v">V</span>';
+
+  let plate;
+  if (opts.projIdx != null) {
+    // The sandbox edits a future gameweek, so a live score from the round in
+    // progress would be the wrong number entirely. Project the week being edited.
+    const xp = p.proj && p.proj[opts.projIdx] != null ? p.proj[opts.projIdx] : 0;
+    plate = `<span class="sc proj" title="Projected points for GW${opts.gw}">` +
+      `${xp.toFixed(1)}<small> xPts</small></span>`;
+  } else if (live) {
+    const base = p.gwPts || 0;
+    plate = `<span class="sc${mult > 1 ? ' dbl' : ''}">${base * mult}<small> pts</small>` +
+      (mult > 1 ? `<span class="mult">${base} pts × ${mult}</span>` : '') + '</span>';
+  } else {
+    const nf = p.fixtures[0];
+    if (nf && !nf.blank) {
+      const g = nf.games[0];
+      const t = TEAM.get(g.opp) || {};
+      const extra = nf.games.length > 1 ? ` +${nf.games.length - 1}` : '';
+      plate = `<span class="nextfx f${Math.round(nf.difficulty)}" title="Difficulty ${nf.difficulty} — ${FDR_WORD[Math.round(nf.difficulty)]}">` +
+        `${g.home ? 'vs' : 'at'} ${esc(t.short || '?')} ${g.home ? '(H)' : '(A)'}${extra}</span>`;
+    } else {
+      plate = '<span class="nextfx f3">no fixture</span>';
+    }
+  }
+
   let chips = '';
   for (let i = 0; i < 3; i++) chips += gwChip(p.fixtures[i]);
-  const mult = pick && pick.multiplier > 1 ? pick.multiplier : 1;
-  return `<button class="man" data-pid="${p.id}" title="${esc(p.full)} · ${p.pts} points this season">` +
-    (pins ? `<span class="pins">${pins}</span>` : '') + kit(p.team, 46) +
-    `<span class="nm">${esc(p.name)}</span>` +
-    `<span class="sc">${(p.gwPts || 0) * mult}${mult > 1 ? `<small>×${mult}</small>` : '<small>pts</small>'}</span>` +
+
+  const cls = 'man' + (opts.swappable ? ' swappable' : '') + (opts.staged ? ' staged' : '');
+  const label = opts.swappable
+    ? `Swap ${p.full} out of your GW${opts.gw} squad`
+    : `${p.full} · ${p.pts} points this season`;
+  return `<button class="${cls}" ${opts.swappable ? `data-swapout="${p.id}"` : `data-pid="${p.id}"`} ` +
+    `title="${esc(label)}" aria-label="${esc(label)}">` +
+    (pins ? `<span class="pins">${pins}</span>` : '') + armband + kit(p.team, 46) +
+    `<span class="nm">${esc(p.name)}</span>${plate}` +
     `<span class="fixrow">${chips}</span></button>`;
 }
 
@@ -893,7 +1123,7 @@ function bindSort(scope, sortKey, dirKey, onChange) {
 function wire() {
   segment('#posSeg', 'pos', renderTargets);
   segment('#priceSeg', 'pDir', renderPrices);
-  segment('#modeSeg', 'mode', () => { applyMode(); });
+  segment('#modeSeg', 'mode', () => { applyMode(); renderAll(); showModeHint(); });
   bindSort('#targets', 'sort', 'dir', renderTargets);
   bindSort('#prices', 'pSort', 'pDirn', renderPrices);
 
@@ -940,13 +1170,63 @@ function wire() {
     applyTheme(); savePrefs();
   });
 
+  $('#coachNext').addEventListener('click', () => {
+    if (coachStep >= COACH.length - 1) closeCoach(); else openCoach(coachStep + 1);
+  });
+  $('#coachSkip').addEventListener('click', closeCoach);
+  $('#coach').addEventListener('click', (e) => { if (e.target.id === 'coach') closeCoach(); });
+
+  $$('#modeSeg button').forEach((b) => {
+    b.addEventListener('mouseenter', () => showModeHint(b.dataset.mode));
+    b.addEventListener('focus', () => showModeHint(b.dataset.mode));
+    b.addEventListener('mouseleave', hideModeHint);
+    b.addEventListener('blur', hideModeHint);
+  });
+
   document.addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-pid]');
-    if (el && !el.hasAttribute('data-buy') && !el.hasAttribute('data-sell')) openPlayer(Number(el.dataset.pid));
+    if (el && !el.hasAttribute('data-buy')) openPlayer(Number(el.dataset.pid));
   });
   $('#dClose').addEventListener('click', closeDrawer);
   $('#scrim').addEventListener('click', closeDrawer);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('#coach').hidden) closeCoach(); else closeDrawer();
+  });
+}
+
+const MODE_COPY = {
+  decision: { icon: '🎯', title: 'Decision Mode',
+    body: 'Just tell me what to do — simplified advice for starting XI, captaincy and recommended transfers.' },
+  analyst: { icon: '📊', title: 'Analyst Mode',
+    body: 'Deep dive into the maths — full tables of xGI, xPts, fixture difficulty ratings and probabilistic simulations.' },
+};
+let hintTimer = null;
+function showModeHint(which) {
+  const m = MODE_COPY[which || prefs.mode];
+  const el = $('#modehint');
+  el.innerHTML = `<b>${m.icon} ${esc(m.title)}</b>${esc(m.body)}`;
+  el.classList.add('on');
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => el.classList.remove('on'), 3200);
+}
+function hideModeHint() { clearTimeout(hintTimer); $('#modehint').classList.remove('on'); }
+
+/** Everything that depends on data or mode. Called on boot and on mode change. */
+function renderAll() {
+  renderGwBanner();
+  renderHeader();
+  renderDashboard();
+  renderScoreBug();
+  renderSquad();
+  renderLeagues();
+  renderPlanner();
+  renderChanges();
+  renderShelves();
+  renderPrices();
+  renderTargets();
+  renderTicker();
+  renderInjuries();
 }
 
 /* ──────────────────────────── boot ──────────────────────────────────── */
@@ -965,20 +1245,12 @@ Promise.all([
   CTX = buildContext(snap, DETAILS);
   CTX.teams.forEach((t) => TEAM.set(t.id, t));
 
+  GW = gameweekState(CTX);
   applyMode();
-  renderHeader();
-  renderDashboard();
-  renderSquad();
-  renderLeagues();
-  renderPlanner();
-  renderChanges();
-  renderShelves();
-  renderPrices();
-  renderTargets();
-  renderTicker();
-  renderInjuries();
+  renderAll();
   $('#prices').hidden = false; $('#targets').hidden = false;
   wire();
+  maybeCoach();
 
   const mins = Math.round((Date.now() - new Date(snap.generatedAt).getTime()) / 60000);
   $('#stamp').textContent = 'updated ' + (mins < 60 ? mins + ' min ago' : Math.round(mins / 60) + 'h ago');
