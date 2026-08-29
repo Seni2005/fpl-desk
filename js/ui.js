@@ -1,0 +1,995 @@
+/**
+ * FPL Desk — presentation layer.
+ *
+ * Everything analytical lives in engine.js. This file only fetches, renders and
+ * wires. If a calculation appears here, it belongs in the engine instead.
+ */
+
+import {
+  buildContext, weeklyAdvice, teamHealth, optimalXI, captainRanking,
+  transferAlternatives, evaluatePlan, categorise, fixtureSwings,
+  ownershipOpportunity, templateDiff, simulatePlayer,
+  FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB,
+} from './engine.js';
+
+/* ───────────────────────────── helpers ──────────────────────────────── */
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.prototype.slice.call(document.querySelectorAll(s));
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const signed = (n, dp = 1) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(dp);
+const compact = (n) => {
+  if (n == null) return '';
+  const a = Math.abs(n);
+  if (a >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'm';
+  if (a >= 1e4) return Math.round(n / 1e3) + 'k';
+  return n.toLocaleString();
+};
+const ordinal = (n) => {
+  if (n == null) return '—';
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n.toLocaleString() + (s[(v - 20) % 10] || s[v] || s[0]);
+};
+
+let CTX = null, CHANGES = null, DETAILS = {}, TEAM = new Map();
+
+/* ───────────────────────────── prefs ────────────────────────────────── */
+
+const DEFAULTS = {
+  mode: 'decision', theme: null, freeTransfers: 1,
+  pos: 'ALL', sort: 'overall', dir: -1, maxPrice: 16, hideFlag: true, hideOwned: false, q: '',
+  pDir: 'all', pQ: '', pMine: false, pOwned: true, pSort: 'ratio', pDirn: -1,
+  activePlan: 'A', plans: null, lastSeen: null,
+};
+function loadPrefs() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('fpldesk.prefs') || '{}') }; } catch { return { ...DEFAULTS }; } }
+function savePrefs() { try { localStorage.setItem('fpldesk.prefs', JSON.stringify(prefs)); } catch {} }
+let prefs = loadPrefs();
+
+function applyTheme() {
+  if (prefs.theme) document.documentElement.setAttribute('data-theme', prefs.theme);
+  else document.documentElement.removeAttribute('data-theme');
+}
+function applyMode() {
+  document.documentElement.setAttribute('data-mode', prefs.mode);
+  $$('#modeSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === prefs.mode)));
+}
+
+/* ─────────────────────────── shared chips ───────────────────────────── */
+
+const FDR_WORD = { 1: 'very easy', 2: 'easy', 3: 'even', 4: 'tough', 5: 'very tough' };
+const fdrClass = (d) => 'f' + Math.min(5, Math.max(1, Math.round(d)));
+
+function fxChip(f) {
+  const t = TEAM.get(f.opp) || {}, o = t.short || '?';
+  const title = `${t.name || '?'}${f.home ? ' (home)' : ' (away)'} · difficulty ${f.d}, ${FDR_WORD[f.d] || ''}`;
+  return `<span class="fx ${fdrClass(f.d)}" title="${esc(title)}">${f.home ? o : o.toLowerCase()}<small>${f.d}</small></span>`;
+}
+function gwChip(fixture) {
+  if (!fixture || fixture.blank) return '<span class="fx f3" title="Blank gameweek">–</span>';
+  return fixture.games.map(fxChip).join('');
+}
+function statusTag(p) {
+  if (p.status === 'a') return '';
+  if (p.status === 's') return '<span class="tag susp">ban</span>';
+  if (p.status === 'd') return `<span class="tag doubt">${p.chance != null ? p.chance + '%' : 'doubt'}</span>`;
+  return '<span class="tag out">out</span>';
+}
+const CAT_LABEL = { buy: 'Buy', hold: 'Hold', monitor: 'Monitor', sell: 'Sell' };
+function catTag(p) {
+  const c = categorise(p);
+  return `<span class="tag cat-${c.tag}" title="${esc(c.why)}">${CAT_LABEL[c.tag]}</span>`;
+}
+
+/* club kits, drawn as plain jerseys — no club marks are used */
+const KIT = {
+  1: { b: '#EF0107', s: '#FFFFFF' }, 2: { b: '#670E36', s: '#95BFE5' },
+  3: { b: '#DA291C', s: '#000000', st: 1 }, 4: { b: '#E30613', s: '#FFFFFF', st: 1 },
+  5: { b: '#0057B8', s: '#FFFFFF', st: 1 }, 6: { b: '#034694', s: '#034694' },
+  7: { b: '#7ACBF0', s: '#FFFFFF' }, 8: { b: '#1B458F', s: '#C4122E', st: 1 },
+  9: { b: '#003399', s: '#003399' }, 10: { b: '#FFFFFF', s: '#000000' },
+  11: { b: '#F5A12D', s: '#000000', st: 1 }, 12: { b: '#0044A9', s: '#FFFFFF' },
+  13: { b: '#FFFFFF', s: '#1D428A' }, 14: { b: '#C8102E', s: '#C8102E' },
+  15: { b: '#6CABDD', s: '#FFFFFF' }, 16: { b: '#DA291C', s: '#DA291C' },
+  17: { b: '#241F20', s: '#FFFFFF', st: 1 }, 18: { b: '#DD0000', s: '#DD0000' },
+  19: { b: '#FFFFFF', s: '#132257' }, 20: { b: '#EB172B', s: '#FFFFFF', st: 1 },
+};
+let kitSeq = 0;
+function kit(teamId, w) {
+  const k = KIT[teamId] || { b: '#8892a6', s: '#ffffff' };
+  const h = Math.round(w * 1.05), id = 'k' + (++kitSeq);
+  let stripes = '';
+  if (k.st) for (let i = 0; i < 4; i++) stripes += `<rect x="${10 + i * 5}" y="4" width="2.6" height="38" fill="${k.s}"/>`;
+  return `<svg class="kit" width="${w}" height="${h}" viewBox="0 0 40 42" aria-hidden="true">` +
+    `<defs><clipPath id="${id}"><path d="M10 8 L10 40 Q20 42 30 40 L30 8 Z"/></clipPath></defs>` +
+    `<path d="M14 3 L5 7 L1.5 17 L8.5 20 L10 16 L10 40 Q20 42 30 40 L30 16 L31.5 20 L38.5 17 L35 7 L26 3 Q20 8.5 14 3 Z" fill="${k.b}" stroke="rgba(0,0,0,.3)" stroke-width="1"/>` +
+    `<g clip-path="url(#${id})">${stripes}</g>` +
+    `<path d="M14 3 L5 7 L1.5 17 L8.5 20 L10 16" fill="${k.s}" stroke="rgba(0,0,0,.3)" stroke-width="1"/>` +
+    `<path d="M26 3 L35 7 L38.5 17 L31.5 20 L30 16" fill="${k.s}" stroke="rgba(0,0,0,.3)" stroke-width="1"/>` +
+    `<path d="M14 3 Q20 8.5 26 3" fill="none" stroke="rgba(0,0,0,.32)" stroke-width="1.2"/></svg>`;
+}
+
+/* ─────────────────────── masthead & headline run ────────────────────── */
+
+function renderHeader() {
+  const S = CTX.snapshot, ne = S.nextEvent;
+  if (ne) {
+    const d = new Date(ne.deadline);
+    $('#eyebrow').textContent = 'Next deadline · ' + ne.name;
+    $('#deadline').textContent = d.toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    $('#deadlineSub').textContent =
+      d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) + ' your time  /  ' +
+      d.toLocaleString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' }) + ' UTC';
+    const t = d.getTime();
+    tick(t); setInterval(() => tick(t), 30000);
+  } else {
+    $('#eyebrow').textContent = 'Season';
+    $('#deadline').textContent = 'No upcoming deadline';
+    $('#cd').textContent = '—';
+  }
+
+  const flagged = CTX.players.filter((p) => p.status !== 'a' && p.owned >= 1).length;
+  const rising = CTX.players.filter((p) => p.progress >= 100).length;
+  const falling = CTX.players.filter((p) => p.progress <= -100).length;
+  const cells = [];
+  if (S.currentEvent) cells.push(['Gameweek', S.currentEvent.name.replace('Gameweek ', '') +
+    ` <small>${S.currentEvent.finished ? 'final' : 'live'}</small>`]);
+  if (CTX.entry) {
+    cells.push(['Overall rank', compact(CTX.entry.overallRank)]);
+    cells.push(['Points', `${CTX.entry.overallPoints} <small>${CTX.entry.gwPoints} this GW</small>`]);
+    cells.push(['Bank', `£${CTX.entry.bank.toFixed(1)} <small>squad £${CTX.entry.squadValue.toFixed(1)}</small>`]);
+  }
+  cells.push(['Flagged', `${flagged} <small>1%+ owned</small>`]);
+  cells.push(['Changes due', `${rising} up <small>${falling} down</small>`]);
+  $('#run').innerHTML = cells.map((c) => `<div><span class="lab">${esc(c[0])}</span><b>${c[1]}</b></div>`).join('');
+}
+function tick(target) {
+  const el = $('#cd'), diff = target - Date.now();
+  if (diff <= 0) { el.textContent = 'closed'; return; }
+  const d = Math.floor(diff / 864e5), h = Math.floor((diff % 864e5) / 36e5), m = Math.floor((diff % 36e5) / 6e4);
+  el.textContent = d > 0 ? `${d}d ${h}h` : `${h}h ${m}m`;
+}
+
+/* ══════════════════ EPIC 1 — the decision dashboard ══════════════════ */
+
+let ADVICE = null;
+
+function renderDashboard() {
+  if (!CTX.squad.length) { $('#thisweek').hidden = true; return; }
+  $('#thisweek').hidden = false;
+  ADVICE = weeklyAdvice(CTX, { freeTransfers: prefs.freeTransfers, simulate: true });
+  if (!ADVICE) { $('#thisweek').hidden = true; return; }
+
+  renderHeadline(ADVICE);
+  renderHealth(ADVICE.health);
+  renderAnswers(ADVICE);
+}
+
+function renderHeadline(a) {
+  const h = a.headline;
+  const players = h.players && h.players.length
+    ? `<div class="hl-players">${h.players.slice(0, 5).map((p) =>
+        `<button class="chipbtn" data-pid="${p.id}">${esc(p.name)} <span>£${p.price.toFixed(1)}</span></button>`).join('')}</div>`
+    : '';
+  $('#headline').innerHTML =
+    `<span class="lab">${h.kind === 'ok' ? 'Where the margin is' : 'Your biggest problem'}</span>` +
+    `<p class="hl-text">${esc(h.text)}</p>${players}`;
+}
+
+function renderHealth(health) {
+  if (!health) { $('#health').hidden = true; return; }
+  $('#health').hidden = false;
+  const band = health.score >= 75 ? 'good' : health.score >= 55 ? 'ok' : 'bad';
+  $('#health').innerHTML =
+    `<div class="hs-num"><span class="lab">Team health</span><b class="${band}">${health.score}</b><span class="of">/100</span></div>` +
+    `<div class="hs-bars">` +
+    health.components.map((c) => {
+      const w = Math.round(c.score);
+      const cls = c.score >= 70 ? 'good' : c.score >= 45 ? 'ok' : 'bad';
+      return `<div class="hs-row" title="${esc(c.detail)}">` +
+        `<span class="hs-k">${esc(c.key)}</span>` +
+        `<span class="hs-t"><i class="${cls}" style="width:${w}%"></i></span>` +
+        `<span class="hs-v">${w}</span></div>`;
+    }).join('') + `</div>` +
+    `<p class="hs-weak"><span class="lab">Main weakness</span> ${esc(health.weakness.key)} — ${esc(health.weakness.detail)}.</p>`;
+}
+
+/** Each row is a question the week actually poses, with the evidence folded away. */
+function renderAnswers(a) {
+  const cap = a.captain, vice = a.vice;
+  const rows = [];
+
+  rows.push({
+    q: 'Start', a: `${a.formation}`,
+    detail: a.xi.map((p) => `<button class="chipbtn" data-pid="${p.id}">${esc(p.name)}</button>`).join(''),
+    why: `Highest-projecting legal XI of the eight formations. Together they project ` +
+         `${a.xi.reduce((s, p) => s + p.proj[0], 0).toFixed(1)} points before the captain's double.`,
+  });
+
+  if (cap) {
+    const imp = cap.impact;
+    rows.push({
+      q: 'Captain', a: esc(cap.player.name),
+      detail: `<span class="ans-sub">${cap.xPts.toFixed(1)} xPts · ${cap.profile.toLowerCase()} · ${cap.eo.toFixed(1)}% effective ownership</span>`,
+      why: `Projects ${(cap.player.proj[0]).toFixed(2)} before doubling. ${cap.minutes}% projected minutes, ` +
+           `${cap.xGI90.toFixed(2)} xGI/90.` +
+           (cap.sim ? ` Simulated ${(cap.sim.pHaul * 100).toFixed(0)}% chance of ten or more, ` +
+             `${(cap.sim.pBlank * 100).toFixed(0)}% chance of a blank.` : '') +
+           (imp ? `<br><span class="assume">Rank impact against the field: median ${signed(imp.rank.p50, 0)} places, ` +
+             `${signed(imp.rank.p25, 0)} at the 25th percentile, ${signed(imp.rank.p75, 0)} at the 75th. ` +
+             `Assumes manager totals are normally distributed with a ${FIELD_SIGMA_GW}-point single-gameweek spread, ` +
+             `and estimates captaincy share from ownership — neither is published by FPL.</span>` : ''),
+    });
+  }
+  if (vice) rows.push({ q: 'Vice', a: esc(vice.player.name), detail: `<span class="ans-sub">${vice.xPts.toFixed(1)} xPts if the captain does not play</span>`, why: '' });
+
+  rows.push({
+    q: 'Bench', a: a.bench.map((p, i) => `${i + 1}. ${p.name}`).join('  '),
+    detail: '', why: 'Reserve keeper first, then the outfield three by projected points — the order they would come on.',
+  });
+
+  if (a.transfer) {
+    const t = a.transfer;
+    rows.push({
+      q: 'Transfer', a: `${esc(t.out.name)} → ${esc(t.in.name)}`,
+      detail: `<span class="ans-sub">${signed(t.horizonGain)} pts over ${CTX.gws.length} GW · ` +
+              `${t.spend > 0 ? `costs £${t.spend.toFixed(1)}m` : t.spend < 0 ? `frees £${Math.abs(t.spend).toFixed(1)}m` : 'no cost'}</span>`,
+      why: `${esc(t.in.name)} is the best available upgrade: ${esc(t.reason)}. ` +
+           `Gain of ${signed(t.perGw, 2)} points per gameweek, ${signed(t.horizonGain)} across the horizon` +
+           (a.hit ? `, against a ${a.hit}-point hit.` : ' with a free transfer.'),
+    });
+    rows.push({ q: 'Expected points', a: a.expectedPoints.toFixed(1), detail: '<span class="ans-sub">best XI plus the captain double</span>', why: '' });
+    rows.push({ q: 'Potential hit', a: a.hit ? `−${a.hit}` : '0', detail: `<span class="ans-sub">${prefs.freeTransfers} free transfer${prefs.freeTransfers === 1 ? '' : 's'}</span>`, why: '' });
+    rows.push({
+      q: 'Confidence', a: a.confidence,
+      detail: `<span class="ans-sub">net ${signed(a.worthIt)} after the hit</span>`,
+      why: `High above six points of net gain, moderate above two and a half, low below that. ` +
+           `A low reading usually means rolling the transfer is the better play.`,
+    });
+  } else {
+    rows.push({ q: 'Transfer', a: 'Roll it', detail: '<span class="ans-sub">nothing clears the bar this week</span>', why: 'No available upgrade projects enough gain to be worth making.' });
+  }
+
+  if (a.risk) rows.push({ q: 'Biggest risk', a: esc(a.risk.text), detail: `<span class="ans-sub">${a.risk.kind}</span>`, why: '' });
+
+  $('#answers').innerHTML = rows.map((r, i) => `
+    <div class="ans">
+      <div class="ans-q lab">${esc(r.q)}</div>
+      <div class="ans-a">${r.a}${r.detail ? `<div class="ans-d">${r.detail}</div>` : ''}</div>
+      ${r.why ? `<button class="whybtn" aria-expanded="false" data-why="${i}">Why?</button>
+        <div class="why" id="why${i}" hidden>${r.why}</div>` : '<span></span>'}
+    </div>`).join('');
+
+  $$('#answers .whybtn').forEach((b) => b.addEventListener('click', () => {
+    const box = $('#why' + b.dataset.why);
+    const open = box.hidden;
+    box.hidden = !open;
+    b.setAttribute('aria-expanded', String(open));
+    b.textContent = open ? 'Hide' : 'Why?';
+  }));
+}
+
+/* ══════════════════ EPIC 1 — what changed ═══════════════════════════ */
+
+function renderChanges() {
+  if (!CHANGES) { $('#changed').hidden = true; return; }
+  const seen = prefs.lastSeen;
+  const groups = [
+    { key: 'priceRises', title: 'Price rises', fmt: (r) => `£${r.from.toFixed(1)} → £${r.to.toFixed(1)}`, cls: 'u' },
+    { key: 'priceFalls', title: 'Price falls', fmt: (r) => `£${r.from.toFixed(1)} → £${r.to.toFixed(1)}`, cls: 'd' },
+    { key: 'statusChanges', title: 'Availability', fmt: (r) => esc(r.news || (r.to === 'a' ? 'back available' : 'flagged')), cls: (r) => (r.worse ? 'd' : 'u') },
+    { key: 'formMovers', title: 'Form swings', fmt: (r) => `${r.from.toFixed(1)} → ${r.to.toFixed(1)}`, cls: (r) => (r.delta > 0 ? 'u' : 'd') },
+    { key: 'ownershipMovers', title: 'Ownership swings', fmt: (r) => `${r.from.toFixed(1)}% → ${r.to.toFixed(1)}%`, cls: (r) => (r.delta > 0 ? 'u' : 'd') },
+  ];
+  const total = groups.reduce((s, g) => s + (CHANGES[g.key] || []).length, 0);
+  if (!total) { $('#changed').hidden = true; return; }
+  $('#changed').hidden = false;
+
+  const mine = new Set(CTX.squad.map((s) => s.id));
+  $('#changedNote').textContent = CHANGES.since
+    ? `since ${new Date(CHANGES.since).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` +
+      (seen ? '' : ' · first visit')
+    : 'first refresh';
+
+  $('#changedBody').innerHTML = groups.filter((g) => (CHANGES[g.key] || []).length).map((g) => {
+    const rows = CHANGES[g.key].slice(0, 10);
+    return `<div class="chg"><span class="lab">${g.title} <i>${CHANGES[g.key].length}</i></span><ul>` +
+      rows.map((r) => {
+        const cls = typeof g.cls === 'function' ? g.cls(r) : g.cls;
+        return `<li${mine.has(r.id) ? ' class="own"' : ''} title="${esc(r.name + ' — ' + g.fmt(r).replace(/<[^>]+>/g, ''))}">` +
+          `<span class="badge">${esc(r.team)}</span>` +
+          `<span class="who" data-pid="${r.id}">${esc(r.name)}</span>` +
+          (mine.has(r.id) ? '<span class="tag mine">yours</span>' : '') +
+          `<span class="chg-v ${cls}">${g.fmt(r)}</span></li>`;
+      }).join('') + '</ul></div>';
+  }).join('');
+
+  prefs.lastSeen = CHANGES.generatedAt;
+  savePrefs();
+}
+
+/* ══════════════════ EPIC 2 — multi-week planner ═════════════════════ */
+
+function blankPlans() {
+  return { A: { name: 'Plan A', weeks: [] }, B: { name: 'Plan B', weeks: [] } };
+}
+function getPlans() {
+  if (!prefs.plans || !prefs.plans.A) prefs.plans = blankPlans();
+  return prefs.plans;
+}
+
+function renderPlanner() {
+  if (!CTX.squad.length) { $('#planner').hidden = true; return; }
+  $('#planner').hidden = false;
+  const plans = getPlans();
+  const active = prefs.activePlan;
+  const evalA = evaluatePlan(plans.A, CTX, { freeTransfers: 1, startingFree: prefs.freeTransfers });
+  const evalB = evaluatePlan(plans.B, CTX, { freeTransfers: 1, startingFree: prefs.freeTransfers });
+  const res = active === 'A' ? evalA : evalB;
+
+  $('#planCompare').innerHTML =
+    `<div class="cmp">` +
+    [['A', evalA], ['B', evalB]].map(([k, e]) => {
+      const win = evalA.net !== evalB.net && ((k === 'A') === (evalA.net > evalB.net));
+      return `<button class="cmp-col${k === active ? ' on' : ''}${win ? ' win' : ''}" data-plan="${k}">` +
+        `<span class="lab">Plan ${k}</span>` +
+        `<b>${e.net.toFixed(1)}</b>` +
+        `<span class="cmp-sub">${e.points.toFixed(1)} pts${e.hits ? ` − ${e.hits} hit` : ''} · ` +
+        `${e.weeks.reduce((s, w) => s + w.transfers.length, 0)} transfer${e.weeks.reduce((s, w) => s + w.transfers.length, 0) === 1 ? '' : 's'}</span></button>`;
+    }).join('') +
+    `<div class="cmp-delta"><span class="lab">Difference</span><b class="${evalA.net > evalB.net ? 'u' : evalA.net < evalB.net ? 'd' : ''}">` +
+    `${signed(evalA.net - evalB.net)}</b><span class="cmp-sub">Plan A versus Plan B over ${CTX.gws.length} gameweeks</span></div>` +
+    `</div>`;
+
+  $('#planProblems').innerHTML = [...new Set(res.problems)]
+    .map((t) => `<div class="plwarn"><span>${esc(t)}</span></div>`).join('');
+
+  $('#planWeeks').innerHTML = res.weeks.map((w) => {
+    const moves = w.transfers.map((t) => {
+      const o = CTX.byId.get(t.out), i = CTX.byId.get(t.in);
+      if (!o || !i) return '';
+      return `<div class="mv"><span class="who" data-pid="${o.id}">${esc(o.name)}</span>` +
+        `<span class="arrow">→</span><span class="who" data-pid="${i.id}">${esc(i.name)}</span>` +
+        `<span class="mv-cost">${signed(i.price - o.price)}m</span>` +
+        `<button class="btn tiny" data-undo="${w.gw}|${t.out}">Remove</button></div>`;
+    }).join('');
+    return `<div class="wk">
+      <div class="wk-h"><span class="wk-gw">GW${w.gw}</span>
+        <span class="wk-pts">${w.points.toFixed(1)} pts</span>
+        ${w.hit ? `<span class="wk-hit">−${w.hit}</span>` : ''}
+        <span class="wk-form">${w.formation || ''}</span>
+        <span class="wk-bank">£${w.bank.toFixed(1)}</span>
+        <button class="btn tiny" data-addgw="${w.gw}">Add transfer</button></div>
+      ${moves || '<div class="wk-none">no transfers</div>'}
+    </div>`;
+  }).join('');
+
+  $$('#planCompare [data-plan]').forEach((b) => b.addEventListener('click', () => {
+    prefs.activePlan = b.dataset.plan; savePrefs(); renderPlanner();
+  }));
+  $$('#planWeeks [data-addgw]').forEach((b) => b.addEventListener('click', () => openPlanTransfer(Number(b.dataset.addgw))));
+  $$('#planWeeks [data-undo]').forEach((b) => b.addEventListener('click', () => {
+    const [gw, out] = b.dataset.undo.split('|').map(Number);
+    const plan = getPlans()[prefs.activePlan];
+    const wk = plan.weeks.find((w) => w.gw === gw);
+    if (wk) wk.transfers = wk.transfers.filter((t) => t.out !== out);
+    savePrefs(); renderPlanner();
+  }));
+  $('#planReset').disabled = res.weeks.every((w) => !w.transfers.length);
+}
+
+/** Squad state at the start of a gameweek, after earlier weeks' moves. */
+function squadAtGw(plan, gw) {
+  let squad = CTX.squad.map((s) => s.id);
+  (plan.weeks || []).filter((w) => w.gw < gw).forEach((w) => {
+    (w.transfers || []).forEach((t) => { squad = squad.map((id) => (id === t.out ? t.in : id)); });
+  });
+  return squad;
+}
+
+function openPlanTransfer(gw) {
+  const plan = getPlans()[prefs.activePlan];
+  const squadIds = squadAtGw(plan, gw);
+  const squad = squadIds.map((id) => CTX.byId.get(id)).filter(Boolean);
+  openDrawer({
+    title: `Add a transfer in GW${gw}`,
+    meta: `${plan.name} · pick who leaves`,
+    body: `<div class="blk"><span class="lab">Your squad in GW${gw}</span><ul class="plist">` +
+      squad.sort((a, b) => a.pos.localeCompare(b.pos) || a.proj[0] - b.proj[0]).map((p) =>
+        `<li><span class="badge">${esc((TEAM.get(p.team) || {}).short || '')}</span>` +
+        `<span class="who">${esc(p.name)}</span>${statusTag(p)}${catTag(p)}` +
+        `<span class="rt"><span class="num">${p.scores.overall.toFixed(1)}</span>` +
+        `<span class="num">£${p.price.toFixed(1)}</span>` +
+        `<button class="btn go" data-sell="${p.id}|${gw}">Sell</button></span></li>`).join('') +
+      '</ul></div>',
+  });
+  $$('#dBody [data-sell]').forEach((b) => b.addEventListener('click', () => {
+    const [pid, g] = b.dataset.sell.split('|').map(Number);
+    openReplacements(pid, g);
+  }));
+}
+
+/** Ranked replacements with the reason each one beat the rest. */
+function openReplacements(outId, gw) {
+  const plan = getPlans()[prefs.activePlan];
+  const squadIds = squadAtGw(plan, gw);
+  const out = CTX.byId.get(outId);
+  const spent = squadIds.reduce((s, id) => {
+    const orig = CTX.squad.find((x) => x.id === id);
+    return s;
+  }, 0);
+  const evalNow = evaluatePlan(plan, CTX, { freeTransfers: 1, startingFree: prefs.freeTransfers });
+  const wk = evalNow.weeks.find((w) => w.gw === gw);
+  const bank = wk ? wk.bank : (CTX.entry ? CTX.entry.bank : 0);
+  const alts = transferAlternatives(out, CTX, bank, squadIds, 12);
+
+  openDrawer({
+    title: `Replace ${out.name}`,
+    meta: `GW${gw} · £${(bank + out.price).toFixed(1)}m available`,
+    body: `<div class="blk"><span class="lab">${alts.length} options ranked by projected gain</span>` +
+      (alts.length ? `<ul class="plist">` + alts.map((a) => {
+        const p = a.player;
+        return `<li${a.atClubLimit ? ' class="atlimit"' : ''}>` +
+          `<span class="badge">${esc((TEAM.get(p.team) || {}).short || '')}</span>` +
+          `<span class="who">${esc(p.name)}</span>${statusTag(p)}` +
+          (a.atClubLimit ? '<span class="tag mine">3 already</span>' : '') +
+          `<span class="alt-why">${esc(a.reason)}</span>` +
+          `<span class="rt"><span class="num ${a.gain > 0 ? 'u' : 'd'}">${signed(a.gain, 2)}/GW</span>` +
+          `<span class="num">£${p.price.toFixed(1)}</span>` +
+          `<button class="btn${a.atClubLimit ? '' : ' go'}" data-buy="${p.id}|${outId}|${gw}">In</button></span></li>`;
+      }).join('') + '</ul>'
+        : '<p class="note">Nothing in this position fits the budget.</p>') + '</div>',
+  });
+
+  $$('#dBody [data-buy]').forEach((b) => b.addEventListener('click', () => {
+    const [inId, oId, g] = b.dataset.buy.split('|').map(Number);
+    const pl = getPlans()[prefs.activePlan];
+    let week = pl.weeks.find((w) => w.gw === g);
+    if (!week) { week = { gw: g, transfers: [] }; pl.weeks.push(week); }
+    week.transfers = week.transfers.filter((t) => t.out !== oId);
+    week.transfers.push({ out: oId, in: inId });
+    pl.weeks.sort((a, b2) => a.gw - b2.gw);
+    savePrefs(); closeDrawer(); renderPlanner();
+  }));
+}
+
+/* ═══════════════════ existing sections, engine-backed ════════════════ */
+
+function manCard(p, pick) {
+  let pins = '';
+  if (pick && pick.captain) pins += '<span class="pin c">C</span>';
+  else if (pick && pick.vice) pins += '<span class="pin v">V</span>';
+  if (p.status !== 'a') pins += `<span class="pin ${p.status === 's' ? 'susp' : p.status === 'd' ? 'doubt' : 'out'}">!</span>`;
+  else if (p.progress >= 55) pins += '<span class="pin up">▲</span>';
+  else if (p.progress <= -55) pins += '<span class="pin dn">▼</span>';
+
+  let chips = '';
+  for (let i = 0; i < 3; i++) chips += gwChip(p.fixtures[i]);
+  const mult = pick && pick.multiplier > 1 ? pick.multiplier : 1;
+  return `<button class="man" data-pid="${p.id}" title="${esc(p.full)} · ${p.pts} points this season">` +
+    (pins ? `<span class="pins">${pins}</span>` : '') + kit(p.team, 46) +
+    `<span class="nm">${esc(p.name)}</span>` +
+    `<span class="sc">${(p.gwPts || 0) * mult}${mult > 1 ? `<small>×${mult}</small>` : '<small>pts</small>'}</span>` +
+    `<span class="fixrow">${chips}</span></button>`;
+}
+
+function renderSquad() {
+  const e = CTX.entry;
+  if (!CTX.squad.length) {
+    $('#squadNote').textContent = 'Not connected';
+    $('#fdrKey').hidden = true;
+    $('#squadCard').innerHTML =
+      '<div class="setup"><h3>Add your team ID and this fills in</h3>' +
+      '<p>The rest of the page works without it. With it you get the weekly recommendation, the pitch, the planner and your leagues.</p><ol>' +
+      '<li><div>Log in at <code>fantasy.premierleague.com</code>, click <b>Points</b>, and copy the number from the address bar: <code>/entry/<b>1234567</b>/event/2</code></div></li>' +
+      '<li><div>Open <code>config.json</code> in your repo and click the pencil.</div></li>' +
+      '<li><div>Set <code>"teamId": 1234567</code> and commit.</div></li></ol></div>';
+    return;
+  }
+  const starters = CTX.squad.filter((p) => p.slot <= 11);
+  const bench = CTX.squad.filter((p) => p.slot > 11).sort((a, b) => a.slot - b.slot);
+  const lines = { GKP: [], DEF: [], MID: [], FWD: [] };
+  starters.forEach((pk) => lines[pk.player.pos].push(pk));
+
+  const shape = [lines.DEF.length, lines.MID.length, lines.FWD.length].join('-');
+  const chips = e.chipsUsed && e.chipsUsed.length ? e.chipsUsed.map((c) => `${c.name} GW${c.gw}`).join(', ') : 'none used';
+  const gwName = CTX.snapshot.currentEvent ? 'GW' + CTX.snapshot.currentEvent.id : 'GW';
+  const best = optimalXI(CTX.squad.map((s) => s.player), 0);
+  const same = best && new Set(best.xi.map((p) => p.id)).size === 11 &&
+    starters.every((s) => best.xi.some((p) => p.id === s.id));
+  $('#squadNote').textContent = `${e.name}  ·  ${shape}  ·  ${gwName} points  ·  ` +
+    (same ? 'matches the optimal XI' : `optimal is ${best ? best.formation : '—'}`) + `  ·  chips: ${chips}`;
+
+  let html = `<div class="pitch"><span class="shape">${shape}</span>`;
+  ['GKP', 'DEF', 'MID', 'FWD'].forEach((pos) => {
+    if (lines[pos].length) html += `<div class="line">${lines[pos].map((r) => manCard(r.player, r)).join('')}</div>`;
+  });
+  html += `</div><div class="bench"><span class="lab">Bench</span><div class="line">` +
+    bench.map((pk) => manCard(pk.player, pk)).join('') + '</div></div>';
+  $('#squadCard').innerHTML = html;
+
+  const key = $('#fdrKey'); key.hidden = false;
+  key.innerHTML = '<span>Fixture difficulty</span>' +
+    [1, 2, 3, 4, 5].map((d) => `<span class="fx f${d}" title="${d} — ${FDR_WORD[d]}">${d}</span>`).join('') +
+    '<span>easiest to hardest · UPPER CASE is home</span>';
+}
+
+function movement(rank, last) {
+  if (rank == null || last == null || last === 0) return '<span class="delta n">–</span>';
+  const d = last - rank;
+  if (d > 0) return `<span class="delta u">▲&#8202;${compact(d)}</span>`;
+  if (d < 0) return `<span class="delta d">▼&#8202;${compact(Math.abs(d))}</span>`;
+  return '<span class="delta n">–</span>';
+}
+function renderLeagues() {
+  const list = CTX.entry && CTX.entry.leagues ? CTX.entry.leagues : [];
+  if (!list.length) { $('#leagueSec').hidden = true; return; }
+  $('#leagueSec').hidden = false;
+  const priv = list.filter((l) => l.type === 'private');
+  const ordered = priv.concat(list.filter((l) => l.type !== 'private'));
+  $('#leagueNote').textContent = priv.length ? `${priv.length} mini-league${priv.length === 1 ? '' : 's'} · select for the table` : 'global only';
+  $('#leagues').innerHTML = ordered.map((l, i) => {
+    const big = l.myRank != null && l.myRank >= 1e5;
+    const rank = l.myRank == null ? '—' : big ? compact(l.myRank) : ordinal(l.myRank);
+    return `<button class="lgrow" data-league="${i}">` +
+      `<span class="pos${rank.length > 6 ? ' sm' : ''}">${rank}</span>` +
+      `<span class="mid"><span class="lgname">${esc(l.name)}</span>` +
+      `<span class="of">${l.type === 'private' ? 'mini-league' : 'global'}${l.size ? ' · ' + compact(l.size) + ' managers' : ''}</span></span>` +
+      movement(l.myRank, l.myLastRank) + '</button>';
+  }).join('');
+  $$('#leagues [data-league]').forEach((b) => b.addEventListener('click', () => openLeague(ordered[Number(b.dataset.league)])));
+}
+function openLeague(l) {
+  if (!l) return;
+  let body;
+  if (!l.standings || !l.standings.length) {
+    body = `<div class="blk"><p class="note">${l.type === 'private'
+      ? 'No table yet. Standings appear once a gameweek has been scored.'
+      : `Global leagues run to millions of managers, so only your position is tracked. You are ${ordinal(l.myRank)}${l.size ? ' of ' + l.size.toLocaleString() : ''}.`}</p></div>`;
+  } else {
+    const meShown = l.standings.some((r) => r.isMe);
+    body = `<div class="blk"><span class="lab">Top ${l.standings.length}</span>` +
+      '<table class="st"><thead><tr><th class="l">#</th><th class="l">Team</th><th>GW</th><th>Total</th></tr></thead><tbody>' +
+      l.standings.map((r) => `<tr class="${r.isMe ? 'me' : ''}"><td class="l rk">${r.rank}</td>` +
+        `<td class="l"><span>${esc(r.team)}</span><span class="mg">${esc(r.manager)}</span></td>` +
+        `<td class="num">${r.gw}</td><td class="num">${r.total.toLocaleString()}</td></tr>`).join('') +
+      '</tbody></table>' +
+      (!meShown && l.myRank ? `<p class="note" style="margin-top:14px">You are ${ordinal(l.myRank)}, outside the top ${l.standings.length} shown.</p>` : '') +
+      '</div>';
+  }
+  openDrawer({ title: l.name, meta: `${l.type === 'private' ? 'Mini-league' : 'Global'} · you are ${ordinal(l.myRank)}${l.size ? ' of ' + compact(l.size) : ''}`, body });
+}
+
+function renderShelves() {
+  const pool = CTX.players.filter((p) => p.status === 'a' && p.avail > 0.35);
+  const mine = (p) => !CTX.squad.some((s) => s.id === p.id);
+  const spread = (list, perTeam, limit) => {
+    const seen = {}, out = [];
+    for (const p of list) {
+      if (out.length >= limit) break;
+      const t = p.player ? p.player.team : p.team;
+      if ((seen[t] || 0) >= perTeam) continue;
+      seen[t] = (seen[t] || 0) + 1; out.push(p);
+    }
+    return out;
+  };
+  const shelves = [
+    { t: 'In form', d: 'Scoring now, not yet widely owned.',
+      rows: spread(pool.filter((p) => p.form >= 3 && p.owned < 20 && mine(p)).sort((a, b) => b.form - a.form), 2, 12),
+      why: (p) => `form ${p.form.toFixed(1)}` },
+    { t: 'Best value', d: 'Most projected points per million.',
+      rows: spread(pool.filter(mine).sort((a, b) => b.scores.value - a.scores.value), 2, 12),
+      why: (p) => `${p.scores.value.toFixed(2)} per £10m` },
+    { t: 'Opportunity', d: 'Highest return the field is not already exposed to.',
+      rows: spread(ownershipOpportunity(CTX, 60).filter((o) => mine(o.player)), 2, 12).map((o) => o.player),
+      why: (p) => `${p.scores.differential.toFixed(2)} above the field` },
+    { t: 'Long-term holds', d: 'Strong across the whole horizon, not just next week.',
+      rows: spread(pool.filter(mine).sort((a, b) => b.scores.long - a.scores.long), 2, 12),
+      why: (p) => `${p.scores.long.toFixed(2)} long-term` },
+  ].filter((s) => s.rows.length >= 3);
+  if (!shelves.length) { $('#picks').hidden = true; return; }
+  $('#picks').hidden = false;
+  $('#shelves').innerHTML = shelves.map((s) => `<div class="shelf"><h3>${esc(s.t)}</h3><p>${esc(s.d)}</p><div class="rail">` +
+    s.rows.map((p) => `<button class="stub" data-pid="${p.id}">` +
+      `<span class="top">${kit(p.team, 20)}<span class="nm">${esc(p.name)}</span></span>` +
+      `<span class="why2">${esc(s.why(p))}</span>` +
+      `<span class="fig"><span>£<b>${p.price.toFixed(1)}</b></span><span>own <b>${p.owned.toFixed(1)}</b></span>` +
+      `<span>x<b>${p.scores.overall.toFixed(1)}</b></span></span></button>`).join('') + '</div></div>').join('');
+}
+
+/* price watch, now with the cost of waiting */
+function priceState(p) {
+  if (p.progress >= 100) return ['u', 'rise due'];
+  if (p.progress >= 55) return ['u', 'rising'];
+  if (p.progress <= -100) return ['d', 'fall due'];
+  if (p.progress <= -55) return ['d', 'falling'];
+  return ['n', 'steady'];
+}
+function renderPrices() {
+  const q = prefs.pQ.trim().toLowerCase();
+  const mine = new Set(CTX.squad.map((s) => s.id));
+  let rows = CTX.players.filter((p) => {
+    if (prefs.pOwned && p.owned < 0.5) return false;
+    if (prefs.pMine && !mine.has(p.id)) return false;
+    if (prefs.pDir === 'up' && p.progress < 55) return false;
+    if (prefs.pDir === 'down' && p.progress > -55) return false;
+    if (prefs.pDir === 'all' && Math.abs(p.progress) < 5 && p.seasonDelta === 0) return false;
+    if (q) {
+      const t = TEAM.get(p.team) || {};
+      if (`${p.full} ${p.name} ${t.name || ''} ${t.short || ''}`.toLowerCase().indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+  rows.sort((a, b) => {
+    const k = prefs.pSort === 'ratio2' ? 'ratio' : prefs.pSort;
+    if (k === 'name') return prefs.pDirn * String(a.name).localeCompare(String(b.name));
+    if (k === 'ratio') return prefs.pDirn * (Math.abs(a.ratio) - Math.abs(b.ratio));
+    return prefs.pDirn * ((a[k] || 0) - (b[k] || 0));
+  });
+
+  const CAP = 150;
+  const up = rows.filter((p) => p.progress >= 100).length;
+  const dn = rows.filter((p) => p.progress <= -100).length;
+  const mineDue = rows.filter((p) => mine.has(p.id) && p.progress <= -100).length;
+  $('#priceNote').textContent = `${rows.length.toLocaleString()} moving · ${up} due up, ${dn} due down` +
+    (mineDue ? ` · ${mineDue} of yours about to drop` : '') + (rows.length > CAP ? ` · top ${CAP}` : '');
+
+  $('#priceRows').innerHTML = rows.slice(0, CAP).map((p) => {
+    const t = TEAM.get(p.team) || {}, st = priceState(p);
+    const w = Math.min(50, (Math.abs(p.progress) / 200) * 50);
+    const bar = '<span class="mk l"></span><span class="mk r"></span>' +
+      (p.progress === 0 ? '' : `<i class="${p.progress > 0 ? 'u' : 'd'}" style="width:${w.toFixed(1)}%"></i>`);
+    // what waiting actually costs, in the direction that matters to you
+    let impact = '<span class="dimtxt">–</span>';
+    if (p.progress >= 100 && !mine.has(p.id)) impact = '<span class="pc d">−£0.1m to wait</span>';
+    else if (p.progress <= -100 && mine.has(p.id)) impact = '<span class="pc d">−£0.1m if you hold</span>';
+    else if (p.progress >= 100 && mine.has(p.id)) impact = '<span class="pc u">+£0.1m coming</span>';
+    return `<tr>` +
+      `<td class="l"><span class="who" data-pid="${p.id}">${esc(p.name)}</span>${statusTag(p)}` +
+      (mine.has(p.id) ? '<span class="tag mine">mine</span>' : '') +
+      `<span class="sub">${esc(t.short || '')} · ${p.pos}</span></td>` +
+      `<td class="num">£${p.price.toFixed(1)}</td>` +
+      `<td class="num hide-sm">${p.seasonDelta === 0 ? '<span class="dimtxt">–</span>' : `<span class="pc ${p.seasonDelta > 0 ? 'u' : 'd'}" style="width:auto">${signed(p.seasonDelta)}</span>`}</td>` +
+      `<td><span class="prog"><span class="track">${bar}</span><span class="pc ${st[0]}">${p.progress > 0 ? '+' : p.progress < 0 ? '−' : ''}${Math.abs(p.progress)}%</span></span></td>` +
+      `<td class="l hide-xs"><span class="state ${st[0]}"><b>${st[1]}</b></span></td>` +
+      `<td class="l hide-sm">${impact}</td>` +
+      `<td class="num hide-xs">${p.owned.toFixed(1)}%</td>` +
+      `<td class="num hide-sm"><span class="pc ${p.ownDelta > 0.005 ? 'u' : p.ownDelta < -0.005 ? 'd' : 'n'}" style="width:auto">${Math.abs(p.ownDelta) < 0.005 ? '–' : signed(p.ownDelta, 2)}</span></td>` +
+      `<td class="num hide-sm"><span class="pc ${p.net > 0 ? 'u' : p.net < 0 ? 'd' : 'n'}" style="width:auto">${p.net === 0 ? '–' : (p.net > 0 ? '+' : '−') + compact(Math.abs(p.net))}</span></td>` +
+      `</tr>`;
+  }).join('') || '<tr><td colspan="9" class="dimtxt" style="padding:30px 0;text-align:left">Nothing matches those filters.</td></tr>';
+}
+
+/* targets, now with the six deconstructed scores */
+function renderTargets() {
+  const q = prefs.q.trim().toLowerCase();
+  const mine = new Set(CTX.squad.map((s) => s.id));
+  const rows = CTX.players.filter((p) => {
+    if (p.pts === 0 && p.mins === 0 && p.epNext === 0) return false;
+    if (prefs.pos !== 'ALL' && p.pos !== prefs.pos) return false;
+    if (p.price > prefs.maxPrice) return false;
+    if (prefs.hideFlag && p.status !== 'a') return false;
+    if (prefs.hideOwned && mine.has(p.id)) return false;
+    if (q) {
+      const t = TEAM.get(p.team) || {};
+      if (`${p.full} ${p.name} ${t.name || ''} ${t.short || ''}`.toLowerCase().indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+  const key = prefs.sort;
+  rows.sort((a, b) => {
+    if (key === 'name') return prefs.dir * String(a.name).localeCompare(String(b.name));
+    if (key === 'price' || key === 'owned') return prefs.dir * ((a[key] || 0) - (b[key] || 0));
+    return prefs.dir * ((a.scores[key] || 0) - (b.scores[key] || 0));
+  });
+  const CAP = 120;
+  $('#targetNote').textContent = rows.length > CAP ? `top ${CAP} of ${rows.length}` : `${rows.length} player${rows.length === 1 ? '' : 's'}`;
+
+  $('#targetRows').innerHTML = rows.slice(0, CAP).map((p) => {
+    const t = TEAM.get(p.team) || {}, s = p.scores;
+    return `<tr>` +
+      `<td class="l"><span class="who" data-pid="${p.id}">${esc(p.name)}</span>${statusTag(p)}` +
+      (mine.has(p.id) ? catTag(p) : '') +
+      `<span class="sub">${esc(t.short || '')} · ${p.pos}</span></td>` +
+      `<td class="num">${p.price.toFixed(1)}</td>` +
+      `<td class="num strong">${s.overall.toFixed(2)}</td>` +
+      `<td class="num hide-xxs">${s.short.toFixed(2)}</td>` +
+      `<td class="num">${s.long.toFixed(2)}</td>` +
+      `<td class="num hide-sm">${s.value.toFixed(2)}</td>` +
+      `<td class="num hide-sm">${s.differential.toFixed(2)}</td>` +
+      `<td class="num hide-xs">${s.captain.toFixed(2)}</td>` +
+      `<td class="num hide-sm">${p.owned.toFixed(1)}</td></tr>`;
+  }).join('') || '<tr><td colspan="9" class="dimtxt" style="padding:30px 0;text-align:left">No players match.</td></tr>';
+}
+
+function renderTicker() {
+  const swings = new Map(fixtureSwings(CTX, 0.7).map((s) => [s.team.id, s]));
+  $('#tickerNote').textContent = `GW ${CTX.gws[0]}–${CTX.gws[CTX.gws.length - 1]} · lower total is easier`;
+  $('#tickHead').innerHTML = '<th class="l">Club</th>' + CTX.gws.map((g) => `<th>${g}</th>`).join('') +
+    '<th>Total</th><th class="l hide-sm">Swing</th>';
+  const rows = CTX.snapshot.teams.map((t) => {
+    const list = CTX.snapshot.fixtures[t.id] || [];
+    let sum = 0;
+    const cells = CTX.gws.map((g) => {
+      const games = list.filter((f) => f.gw === g);
+      if (!games.length) { sum += 3; return null; }
+      games.forEach((f) => { sum += f.d; });
+      return games;
+    });
+    return { t, cells, sum, swing: swings.get(t.id) };
+  }).sort((a, b) => a.sum - b.sum || a.t.name.localeCompare(b.t.name));
+
+  $('#ticker').innerHTML = rows.map((r) => `<tr><td class="l"><span class="badge">${esc(r.t.short)}</span> ${esc(r.t.name)}</td>` +
+    r.cells.map((c) => `<td style="text-align:center">${c ? c.map(fxChip).join(' ') : '<span class="fx f3">–</span>'}</td>`).join('') +
+    `<td class="num" style="font-weight:600">${r.sum}</td>` +
+    `<td class="l hide-sm">${r.swing ? `<span class="swing ${r.swing.direction === 'easier' ? 'u' : 'd'}">${r.swing.direction === 'easier' ? '↗' : '↘'} GW${r.swing.gw}</span>` : '<span class="dimtxt">–</span>'}</td></tr>`).join('');
+  $('#fixtures').hidden = false;
+}
+
+function renderInjuries() {
+  const byTeam = {};
+  CTX.players.filter((p) => p.status !== 'a').forEach((p) => { (byTeam[p.team] = byTeam[p.team] || []).push(p); });
+  const keys = Object.keys(byTeam);
+  if (!keys.length) { $('#news').hidden = true; return; }
+  $('#news').hidden = false;
+  const rank = { u: 0, i: 1, s: 2, d: 3, n: 4 };
+  $('#clubs').innerHTML = keys.sort((a, b) => byTeam[b].length - byTeam[a].length).map((tid) => {
+    const t = TEAM.get(Number(tid)) || {};
+    const items = byTeam[tid].sort((a, b) => ((rank[a.status] ?? 9) - (rank[b.status] ?? 9)) || b.owned - a.owned);
+    return `<div class="club"><h4><span class="badge">${esc(t.short || '')}</span>${esc(t.name || '')}<span class="n">${items.length}</span></h4><ul>` +
+      items.map((p) => `<li><span class="nm" data-pid="${p.id}">${esc(p.name)}</span>${statusTag(p)}` +
+        (p.owned >= 3 ? `<span class="sub">${p.owned.toFixed(1)}%</span>` : '') +
+        `<span class="ds">${esc(p.news || 'No detail given')}</span></li>`).join('') + '</ul></div>';
+  }).join('');
+}
+
+/* ─────────────────────────── charts & drawer ────────────────────────── */
+
+function barChart(data, opts = {}) {
+  const w = opts.width || 400, h = opts.height || 92, pad = 18, gap = 3, maxBar = opts.maxBar || 40;
+  if (!data.length) return '';
+  let max = Math.max(...data.map((d) => d.value)) || 1;
+  if (max <= 0) max = 1;
+  const bw = Math.min(maxBar, (w - (data.length - 1) * gap) / data.length);
+  const span = data.length * bw + (data.length - 1) * gap, x0 = (w - span) / 2;
+  const plot = h - pad - (opts.values ? 14 : 6);
+  const bars = data.map((d, i) => {
+    const bh = Math.max(2, (d.value / max) * plot), x = x0 + i * (bw + gap), y = h - pad - bh;
+    return `<rect class="cbar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" data-t="${esc(d.label + ' · ' + d.value + (opts.unit || ''))}"></rect>` +
+      (opts.labels ? `<text class="lbl" x="${(x + bw / 2).toFixed(1)}" y="${h - 5}" text-anchor="middle">${esc(d.short || d.label)}</text>` : '') +
+      (opts.values ? `<text class="val" x="${(x + bw / 2).toFixed(1)}" y="${(y - 4).toFixed(1)}" text-anchor="middle">${d.value}</text>` : '');
+  }).join('');
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" style="max-height:${h}px">` +
+    `<line class="axis" x1="${Math.max(0, x0 - 6)}" y1="${h - pad}" x2="${Math.min(w, x0 + span + 6)}" y2="${h - pad}"/>${bars}</svg>`;
+}
+
+const tipEl = () => $('#tip');
+function showTip(html, x, y) {
+  const t = tipEl(); t.innerHTML = html; t.classList.add('on');
+  const r = t.getBoundingClientRect();
+  t.style.left = Math.max(6, Math.min(window.innerWidth - r.width - 6, x - r.width / 2)) + 'px';
+  t.style.top = Math.max(6, y - r.height - 9) + 'px';
+}
+function hideTip() { tipEl().classList.remove('on'); }
+
+let lastFocus = null;
+function openDrawer(o) {
+  lastFocus = document.activeElement;
+  $('#dName').textContent = o.title;
+  $('#dMeta').textContent = o.meta || '';
+  $('#dBody').innerHTML = o.body;
+  $('#scrim').classList.add('on'); $('#drawer').classList.add('on'); $('#drawer').focus();
+  $$('#dBody .cbar').forEach((b) => {
+    b.addEventListener('mouseenter', () => {
+      const r = b.getBoundingClientRect();
+      showTip(esc(b.dataset.t), r.left + r.width / 2, r.top);
+    });
+    b.addEventListener('mouseleave', hideTip);
+  });
+}
+function closeDrawer() {
+  $('#scrim').classList.remove('on'); $('#drawer').classList.remove('on'); hideTip();
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
+
+/** Player detail, now leading with why the algorithm rates him. */
+function openPlayer(pid) {
+  const p = CTX.byId.get(pid); if (!p) return;
+  const t = TEAM.get(p.team) || {}, det = DETAILS[pid], s = p.scores, st = priceState(p);
+  const cat = categorise(p);
+  let b = '';
+
+  if (p.news) b += `<div class="newsbox">${esc(p.news)}</div>`;
+
+  b += `<div class="blk"><span class="lab">Why it rates him</span>` +
+    `<div class="factors">` + s.breakdown.factors.map((f) => {
+      const cls = f.value >= 70 ? 'good' : f.value >= 45 ? 'ok' : 'bad';
+      return `<div class="fac"><span class="fac-k">${esc(f.key)}</span>` +
+        `<span class="fac-t"><i class="${cls}" style="width:${Math.round(f.value)}%"></i></span>` +
+        `<span class="fac-v">${esc(f.raw)}</span></div>`;
+    }).join('') + `</div>` +
+    (s.breakdown.concern ? `<p class="concern">Main concern: ${esc(s.breakdown.concern)}.</p>` : '<p class="note">No obvious weakness in his profile.</p>') +
+    `</div>`;
+
+  b += `<div class="blk"><span class="lab">Scores</span><div class="kv">` +
+    [['Overall', s.overall.toFixed(2)], ['Short term', s.short.toFixed(2)], ['Long term', s.long.toFixed(2)],
+     ['Value', s.value.toFixed(2)], ['Differential', s.differential.toFixed(2)], ['Captain', s.captain.toFixed(2)]]
+      .map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('') +
+    `</div><p class="note">All but Value are expected points per gameweek. Verdict: <b>${CAT_LABEL[cat.tag]}</b> — ${esc(cat.why)}.</p></div>`;
+
+  b += `<div class="blk"><span class="lab">This season</span><div class="kv">` +
+    [['Price', '£' + p.price.toFixed(1)], ['Points', p.pts], ['Per game', p.ppg.toFixed(1)],
+     ['Owned', p.owned.toFixed(1) + '%'], ['Effective', p.eo.toFixed(1) + '%'], ['Minutes', p.mins]]
+      .map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('') + '</div></div>';
+
+  b += `<div class="blk"><span class="lab">Underlying</span><div class="kv">` +
+    [['xG', p.xG.toFixed(2)], ['xA', p.xA.toFixed(2)], ['xGI / 90', p.per90.xGI.toFixed(2)],
+     ['Goals', p.goals], ['Assists', p.assists], ['Bonus', p.bonus]]
+      .map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('') + '</div></div>';
+
+  if (p.avail > 0) {
+    const sim = simulatePlayer(p, 0, CTX, 1200);
+    b += `<div class="blk"><span class="lab">Next gameweek, simulated</span><div class="kv">` +
+      [['Median', sim.p50], ['25th', sim.p25], ['75th', sim.p75],
+       ['Mean', sim.mean.toFixed(1)], ['Haul 10+', (sim.pHaul * 100).toFixed(0) + '%'], ['Blank ≤2', (sim.pBlank * 100).toFixed(0) + '%']]
+        .map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('') +
+      `</div><p class="assume">1,200 draws over goals, assists, clean sheets and minutes from his per-90 rates and this fixture.</p></div>`;
+  }
+
+  b += `<div class="blk"><span class="lab">Price</span><div class="kv">` +
+    [['Started', '£' + p.priceStart.toFixed(1)], ['Season', p.seasonDelta === 0 ? '–' : signed(p.seasonDelta)],
+     ['Progress', `${p.progress > 0 ? '+' : p.progress < 0 ? '−' : ''}${Math.abs(p.progress)}%`],
+     ['Net transfers', p.net === 0 ? '–' : (p.net > 0 ? '+' : '−') + compact(Math.abs(p.net))],
+     ['Own change', Math.abs(p.ownDelta) < 0.005 ? '–' : signed(p.ownDelta, 2)], ['Status', st[1]]]
+      .map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('') + '</div></div>';
+
+  if (det && det.gws && det.gws.length) {
+    b += `<div class="blk"><span class="lab">Points by gameweek</span>` +
+      barChart(det.gws.map((g) => ({ label: 'GW' + g.gw, short: String(g.gw), value: g.pts })), { labels: true, unit: ' pts' }) + '</div>';
+  }
+  if (det && det.past && det.past.length) {
+    const seasons = det.past.slice(-6);
+    b += `<div class="blk"><span class="lab">Previous seasons</span>` +
+      barChart(seasons.map((x) => ({ label: x.season, short: x.season.slice(0, 2) + '/' + x.season.slice(-2), value: x.pts })), { height: 104, labels: true, values: true, unit: ' pts' }) +
+      '<table class="seasons">' + seasons.slice().reverse().map((x) =>
+        `<tr><td>${esc(x.season)}</td><td>${x.mins} mins · ${x.goals}g ${x.assists}a · ended £${x.endCost.toFixed(1)}</td><td>${x.pts}</td></tr>`).join('') +
+      '</table></div>';
+  }
+
+  b += `<div class="blk"><span class="lab">Next ${p.fixtures.length} fixtures</span><div class="fxlist">` +
+    p.fixtures.map((f) => gwChip(f)).join('') + '</div></div>';
+
+  openDrawer({ title: p.full || p.name, meta: `${t.name || ''} · ${p.pos} · £${p.price.toFixed(1)}m` +
+    (CTX.squad.some((s2) => s2.id === p.id) ? ' · in your squad' : ''), body: b });
+}
+
+/* ──────────────────────────── wiring ────────────────────────────────── */
+
+function segment(sel, key, onChange) {
+  $$(sel + ' button').forEach((b) => {
+    const v = b.dataset.pos || b.dataset.dir || b.dataset.mode;
+    b.setAttribute('aria-pressed', String(v === prefs[key]));
+    b.addEventListener('click', () => {
+      prefs[key] = v;
+      $$(sel + ' button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      savePrefs(); onChange();
+    });
+  });
+}
+function bindSort(scope, sortKey, dirKey, onChange) {
+  $$(scope + ' thead th.s').forEach((th) => {
+    if (prefs[sortKey] === th.dataset.k) th.setAttribute('aria-sort', prefs[dirKey] === 1 ? 'ascending' : 'descending');
+    th.addEventListener('click', () => {
+      const k = th.dataset.k;
+      if (prefs[sortKey] === k) prefs[dirKey] = -prefs[dirKey];
+      else { prefs[sortKey] = k; prefs[dirKey] = k === 'name' ? 1 : -1; }
+      $$(scope + ' thead th.s').forEach((x) => x.removeAttribute('aria-sort'));
+      th.setAttribute('aria-sort', prefs[dirKey] === 1 ? 'ascending' : 'descending');
+      savePrefs(); onChange();
+    });
+  });
+}
+
+function wire() {
+  segment('#posSeg', 'pos', renderTargets);
+  segment('#priceSeg', 'pDir', renderPrices);
+  segment('#modeSeg', 'mode', () => { applyMode(); });
+  bindSort('#targets', 'sort', 'dir', renderTargets);
+  bindSort('#prices', 'pSort', 'pDirn', renderPrices);
+
+  const bindInput = (sel, key, fn, num) => {
+    const el = $(sel); if (!el) return;
+    el.value = prefs[key];
+    el.addEventListener('input', () => {
+      prefs[key] = num ? (parseFloat(el.value) || 0) : el.value;
+      savePrefs(); fn();
+    });
+  };
+  bindInput('#search', 'q', renderTargets);
+  bindInput('#priceSearch', 'pQ', renderPrices);
+  bindInput('#maxPrice', 'maxPrice', renderTargets, true);
+
+  [['#hideFlag', 'hideFlag', renderTargets], ['#hideOwned', 'hideOwned', renderTargets],
+   ['#priceMine', 'pMine', renderPrices], ['#priceOwned', 'pOwned', renderPrices]].forEach(([sel, key, fn]) => {
+    const el = $(sel); el.checked = !!prefs[key];
+    el.addEventListener('change', () => { prefs[key] = el.checked; savePrefs(); fn(); });
+  });
+
+  const ft = $('#ftIn');
+  ft.value = prefs.freeTransfers;
+  ft.addEventListener('change', () => {
+    prefs.freeTransfers = Math.max(0, Math.min(5, parseInt(ft.value, 10) || 0));
+    savePrefs(); renderDashboard(); renderPlanner();
+  });
+
+  $('#planReset').addEventListener('click', () => {
+    getPlans()[prefs.activePlan] = { name: `Plan ${prefs.activePlan}`, weeks: [] };
+    savePrefs(); renderPlanner();
+  });
+  $('#planCopy').addEventListener('click', () => {
+    const from = prefs.activePlan, to = from === 'A' ? 'B' : 'A';
+    getPlans()[to] = JSON.parse(JSON.stringify(getPlans()[from]));
+    getPlans()[to].name = `Plan ${to}`;
+    prefs.activePlan = to; savePrefs(); renderPlanner();
+  });
+
+  $('#themeBtn').addEventListener('click', () => {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+      (!prefs.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+    prefs.theme = dark ? 'light' : 'dark';
+    applyTheme(); savePrefs();
+  });
+
+  document.addEventListener('click', (ev) => {
+    const el = ev.target.closest('[data-pid]');
+    if (el && !el.hasAttribute('data-buy') && !el.hasAttribute('data-sell')) openPlayer(Number(el.dataset.pid));
+  });
+  $('#dClose').addEventListener('click', closeDrawer);
+  $('#scrim').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+}
+
+/* ──────────────────────────── boot ──────────────────────────────────── */
+
+applyTheme();
+const bust = '?v=' + Date.now();
+const grab = (f, fallback) => fetch(f + bust).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
+
+Promise.all([
+  fetch('data/snapshot.json' + bust).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }),
+  grab('data/details.json', {}),
+  grab('data/changes.json', null),
+]).then(([snap, details, changes]) => {
+  DETAILS = details || {};
+  CHANGES = changes;
+  CTX = buildContext(snap, DETAILS);
+  CTX.teams.forEach((t) => TEAM.set(t.id, t));
+
+  applyMode();
+  renderHeader();
+  renderDashboard();
+  renderSquad();
+  renderLeagues();
+  renderPlanner();
+  renderChanges();
+  renderShelves();
+  renderPrices();
+  renderTargets();
+  renderTicker();
+  renderInjuries();
+  $('#prices').hidden = false; $('#targets').hidden = false;
+  wire();
+
+  const mins = Math.round((Date.now() - new Date(snap.generatedAt).getTime()) / 60000);
+  $('#stamp').textContent = 'updated ' + (mins < 60 ? mins + ' min ago' : Math.round(mins / 60) + 'h ago');
+  document.documentElement.classList.add('ready');
+}).catch((err) => {
+  $('#deadline').textContent = 'No data yet';
+  $('#deadlineSub').textContent = 'The refresh job has not produced a snapshot.';
+  $('#squadCard').innerHTML = '<div class="setup"><h3>Waiting on the first refresh</h3>' +
+    '<p>The page loaded, but <code>data/snapshot.json</code> is not there yet. On a new repo that is normal.</p><ol>' +
+    '<li><div>Open the <b>Actions</b> tab in your repo.</div></li>' +
+    '<li><div>Pick <b>Refresh FPL data</b>, then <b>Run workflow</b>.</div></li>' +
+    '<li><div>Give it a minute, then reload.</div></li></ol>' +
+    `<p class="note" style="margin-top:16px">${esc(err.message)}</p></div>`;
+});
