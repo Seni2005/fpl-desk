@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FPL Desk</title>
 <meta name="description" content="Squad, prices, fixtures and transfer targets for Fantasy Premier League.">
-<meta name="build" content="8">
+<meta name="build" content="9">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0B0D0E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -860,6 +860,37 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
   .ms-names{display:none}
 }
 
+/* ── the team chooser ──────────────────────────────────────────
+   One link, several managers. It asks every visit rather than
+   remembering: on a shared link a sticky choice quietly shows you
+   someone else's squad and you would not notice it was wrong. */
+.gatebox{max-width:560px}
+.gate-list{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);
+  margin-bottom:16px}
+.gate-opt{display:grid;grid-template-columns:minmax(0,1fr) auto;
+  grid-template-rows:auto auto;gap:3px 18px;
+  align-items:center;text-align:left;background:var(--paper);padding:11px 14px;width:100%}
+.gate-opt:hover:not([disabled]),.gate-opt:focus-visible{background:var(--paper-3)}
+.gate-opt[disabled]{opacity:.45;cursor:not-allowed}
+.gate-nm{grid-area:1/1;font-size:16px;font-weight:600;letter-spacing:-.01em}
+.gate-sub{grid-area:2/1;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--ink-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gate-figs{grid-area:1/2/3/3;display:flex;gap:16px;font-family:"JetBrains Mono",monospace;
+  font-size:14px;font-weight:600}
+.gate-figs span{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.gate-figs .lab{font-style:normal}
+
+/* who you are looking at, and the way back */
+.teamTag{display:flex;align-items:baseline;gap:7px;flex-shrink:0;padding:4px 9px;
+  border:1px solid var(--rule-2);font-family:"JetBrains Mono",monospace;font-size:10px;
+  letter-spacing:.06em}
+.teamTag b{font-size:11px;letter-spacing:.02em}
+.teamTag .who-lab{color:var(--ink-3);text-transform:uppercase}
+.teamTag .who-sw{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
+.teamTag:hover{background:var(--paper-3)}
+.teamTag:hover .who-sw{color:var(--ink)}
+
+
 /* ── the squad panel's own status ──────────────────────────────
    The page banner answers "where is the round". This answers the
    narrower question you have while looking at the pitch: are these
@@ -1051,6 +1082,7 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
         <button data-mode="analyst" aria-pressed="false"
           title="Deep dive into the maths — full tables of xGI, xPts, fixture difficulty and probabilistic simulations."><i>📊</i>Analyst</button>
       </div>
+      <button class="teamTag" id="teamTag" hidden></button>
       <button class="themeBtn" id="themeBtn">Invert</button>
     </div>
   </div>
@@ -1262,6 +1294,18 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
   <div class="dbody" id="dBody"></div>
 </aside>
 <div class="modehint" id="modehint" aria-live="polite"></div>
+<div class="coach" id="gate" hidden role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+  <div class="coachbox gatebox">
+    <span class="step">Whose team?</span>
+    <h3 id="gateTitle">Pick a squad</h3>
+    <p>Everyone on this page shares the same player data, prices and fixtures &mdash;
+       only the squad, planner and leagues change with who you pick.</p>
+    <div class="gate-list" id="gateList"></div>
+    <div class="coach-nav">
+      <button class="linkbtn" id="gateSkip">Just browsing &mdash; no squad</button>
+    </div>
+  </div>
+</div>
 <div class="coach" id="coach" hidden role="dialog" aria-modal="true" aria-labelledby="coachTitle">
   <div class="coachbox">
     <span class="step" id="coachStep"></span>
@@ -1280,6 +1324,6 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
      happily serve a cached index.html against a fresh js/, which is how you
      end up staring at an old page after a correct upload. Bump BUILD in both
      places when you ship, and the browser cannot get a mismatched pair. -->
-<script type="module" src="js/ui.js?v=8"></script>
+<script type="module" src="js/ui.js?v=9"></script>
 </body>
 </html>
