@@ -1,0 +1,25 @@
+name: Tests
+
+# Runs on every push that touches the engine or its tests. Deliberately separate
+# from the data refresh: a failing test should never stop the snapshot updating.
+on:
+  push:
+    paths:
+      - 'js/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
+      - '.github/workflows/test.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Engine unit tests
+        run: node --test 'tests/*.test.mjs'
