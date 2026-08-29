@@ -18,6 +18,19 @@ function fixturesFor(teamId, gws) {
   }));
 }
 
+function makeEntry(id, name, manager, order, pts) {
+  return {
+    id, key: String(id), label: manager, name, manager,
+    overallRank: 400000, overallPoints: pts, gwPoints: pts, gwRank: 400000,
+    bank: 2.5, squadValue: 99.5, pickedForGw: 1,
+    picks: order.map((pid, i) => ({
+      id: pid, slot: i + 1, captain: i === 0, vice: i === 1, multiplier: i < 11 ? 1 : 0,
+    })),
+    chipsUsed: [], activeChip: null, transfersMade: 0, transferCost: 0,
+    seasonHistory: [], leagues: [],
+  };
+}
+
 export function makeSnapshot(opts = {}) {
   const gws = opts.gws || [2, 3, 4, 5, 6, 7];
   const fixtures = {};
@@ -130,6 +143,14 @@ export function makeSnapshot(opts = {}) {
     teams: TEAMS,
     fixtures,
     players,
+    // Two managers, so entry selection has something to select between.
+    // The second is a deliberate near-duplicate with a different id: the bug
+    // to guard against is matching on the wrong field and silently landing on
+    // the first entry every time.
+    entries: opts.noEntry ? [] : [
+      makeEntry(1234567, 'Test Team', 'Tester', finalOrder, 61),
+      makeEntry(7654321, 'Other Team', 'Rival', finalOrder.slice().reverse(), 74),
+    ],
     entry: opts.noEntry ? null : {
       id: 1234567, name: 'Test Team', manager: 'Tester',
       overallRank: 400000, overallPoints: 61, gwPoints: 61, gwRank: 400000,
