@@ -1,4 +1,12 @@
 {
-  "teamId": 3176331,
-  "_comment": "Put your FPL team ID here as a number, with no quotes. Find it by logging in at fantasy.premierleague.com, clicking Points, and reading the number in the address bar: /entry/1234567/event/2 -> teamId is 1234567. Saving this file triggers a refresh automatically."
+  "_READ_THIS_FIRST": "Replace BOTH ids below before you commit this. Your own id is already in the config.json sitting in your repo right now — open that file first and copy the number out of it. Your friend's id he has to send you: he logs in at fantasy.premierleague.com, clicks Points, and reads the number out of the address bar — fantasy.premierleague.com/entry/1234567/event/2 means his id is 1234567. Ids are bare numbers with no quotes. If you leave the placeholders in, both names show up greyed out in the chooser and nobody gets a squad.",
+
+  "teams": [
+    { "name": "Seni", "id": 3176331 },
+    { "name": "Anthony", "id": 1169244 }
+  ],
+
+  "_notes": "`name` is only the label on the chooser button, so use whatever you two call each other. Add more people by copying a line. With two or more listed the page asks who's looking each time it opens; with one it just loads that squad and never asks. Saving this file kicks off a refresh by itself, so squads appear a minute or two after you commit.",
+
+  "_safer_alternative": "You do not have to upload this file at all. Opening config.json in your repo, clicking the pencil and adding one line for your friend is less risky, because your own id never leaves the file."
 }
