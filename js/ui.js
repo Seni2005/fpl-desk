@@ -7,11 +7,11 @@
 
 import {
   buildContext, weeklyAdvice, teamHealth, optimalXI, captainRanking,
-  transferAlternatives, evaluatePlan, categorise, fixtureSwings,
+  transferAlternatives, replacementOptions, evaluatePlan, categorise, fixtureSwings,
   ownershipOpportunity, templateDiff, simulatePlayer,
   gameweekState, playerTraits, CHIPS, matchSchedule, selectEntry,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB,
-} from './engine.js?v=9';
+} from './engine.js?v=10';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -616,36 +616,108 @@ function openReplacements(outId, gw) {
   const evalNow = evaluatePlan(plan, CTX, { freeTransfers: 1, startingFree: prefs.freeTransfers });
   const wk = evalNow.weeks.find((w) => w.gw === gw);
   const bank = wk ? wk.bank : (CTX.entry ? CTX.entry.bank : 0);
-  const alts = transferAlternatives(out, CTX, bank, squadIds, 12);
+  const ceiling = bank + out.price;
+
+  /**
+   * One row. A blocked player is rendered exactly like a legal one except the
+   * button is disabled and the reason replaces the pitch — so searching for
+   * someone always answers "can I have him?", never leaves you wondering
+   * whether the search is broken.
+   */
+  const row = (a) => {
+    const p = a.player;
+    const t = TEAM.get(p.team) || {};
+    return `<li class="alt${a.legal ? '' : ' blocked'}">` +
+      `<span class="badge">${esc(t.short || '')}</span>` +
+      `<span class="who" data-pid="${p.id}">${esc(p.name)}</span>${statusTag(p)}` +
+      (a.legal
+        ? `<span class="alt-why">${esc(a.reason)}</span>`
+        : `<span class="tag block" title="${esc(a.blockedWhy)}">${esc(a.blockedText)}</span>`) +
+      `<span class="rt"><span class="num ${a.gain > 0 ? 'u' : 'd'}">${signed(a.gain, 2)}/GW</span>` +
+      `<span class="num">£${p.price.toFixed(1)}</span>` +
+      (a.legal
+        ? `<button class="btn go" data-buy="${p.id}|${outId}|${gw}">In</button>`
+        : `<button class="btn" disabled title="${esc(a.blockedWhy)}">—</button>`) +
+      '</span></li>';
+  };
+
+  /**
+   * Three bands with a header on each, so the eye has somewhere to stop.
+   * A flat list of forty rows where only the first two are usable reads as
+   * noise; the same rows under "you can't have these" read as an answer.
+   */
+  const BANDS = [
+    { of: (r) => r.legal, lab: (n) => `${n} you can make now` },
+    { of: (r) => !r.legal && r.fixable, lab: (n) => `${n} blocked by money or the club limit` },
+    { of: (r) => !r.legal && !r.fixable, lab: (n) => `${n} the rules won't allow` },
+  ];
+
+  const listFor = (q) => {
+    const rows = replacementOptions(out, CTX, bank, squadIds, { query: q, limit: q ? 40 : 12 });
+    if (!rows.length) {
+      return q
+        ? `<p class="note">No player matches “${esc(q)}”. Try a surname or a club.</p>`
+        : '<p class="note">Nothing in this position fits the budget. Search to see who is out of reach and by how much.</p>';
+    }
+    if (!q) {
+      return '<span class="lab">' + rows.length + ' options ranked by projected gain</span>' +
+        '<ul class="plist">' + rows.map(row).join('') + '</ul>';
+    }
+    const groups = BANDS.map((bnd) => ({ bnd, rows: rows.filter(bnd.of) })).filter((g) => g.rows.length);
+    // the per-band headers already say how many you can make, so the top line
+    // only carries the total — repeating it reads as two different numbers
+    return `<span class="lab">${rows.length} match${rows.length === 1 ? '' : 'es'} ` +
+      `for “${esc(q)}”</span><ul class="plist">` +
+      groups.map((g) =>
+        `<li class="grp"><span class="lab">${esc(g.bnd.lab(g.rows.length))}</span></li>` +
+        g.rows.map(row).join('')).join('') +
+      '</ul>';
+  };
 
   openDrawer({
     title: `Replace ${out.name}`,
-    meta: `GW${gw} · £${(bank + out.price).toFixed(1)}m available`,
-    body: `<div class="blk"><span class="lab">${alts.length} options ranked by projected gain</span>` +
-      (alts.length ? `<ul class="plist">` + alts.map((a) => {
-        const p = a.player;
-        return `<li${a.atClubLimit ? ' class="atlimit"' : ''}>` +
-          `<span class="badge">${esc((TEAM.get(p.team) || {}).short || '')}</span>` +
-          `<span class="who">${esc(p.name)}</span>${statusTag(p)}` +
-          (a.atClubLimit ? '<span class="tag mine">3 already</span>' : '') +
-          `<span class="alt-why">${esc(a.reason)}</span>` +
-          `<span class="rt"><span class="num ${a.gain > 0 ? 'u' : 'd'}">${signed(a.gain, 2)}/GW</span>` +
-          `<span class="num">£${p.price.toFixed(1)}</span>` +
-          `<button class="btn${a.atClubLimit ? '' : ' go'}" data-buy="${p.id}|${outId}|${gw}">In</button></span></li>`;
-      }).join('') + '</ul>'
-        : '<p class="note">Nothing in this position fits the budget.</p>') + '</div>',
+    meta: `GW${gw} · £${ceiling.toFixed(1)}m available`,
+    body: '<div class="blk">' +
+      '<div class="altsearch">' +
+        `<input type="search" id="altQ" autocomplete="off" spellcheck="false"` +
+        ` placeholder="Search any player or club…" aria-label="Search for a replacement">` +
+        `<button class="linkbtn" id="altClear" hidden>clear</button>` +
+      '</div>' +
+      `<div id="altList">${listFor('')}</div>` +
+    '</div>',
   });
 
-  $$('#dBody [data-buy]').forEach((b) => b.addEventListener('click', () => {
-    const [inId, oId, g] = b.dataset.buy.split('|').map(Number);
-    const pl = getPlans()[prefs.activePlan];
-    let week = pl.weeks.find((w) => w.gw === g);
-    if (!week) { week = { gw: g, transfers: [] }; pl.weeks.push(week); }
-    week.transfers = week.transfers.filter((t) => t.out !== oId);
-    week.transfers.push({ out: oId, in: inId });
-    pl.weeks.sort((a, b2) => a.gw - b2.gw);
-    savePrefs(); closeDrawer(); renderPlanner();
-  }));
+  const wireRows = () => {
+    $$('#dBody [data-buy]').forEach((b) => b.addEventListener('click', () => {
+      const [inId, oId, g] = b.dataset.buy.split('|').map(Number);
+      const pl = getPlans()[prefs.activePlan];
+      let week = pl.weeks.find((w) => w.gw === g);
+      if (!week) { week = { gw: g, transfers: [] }; pl.weeks.push(week); }
+      week.transfers = week.transfers.filter((t) => t.out !== oId);
+      week.transfers.push({ out: oId, in: inId });
+      pl.weeks.sort((a, b2) => a.gw - b2.gw);
+      savePrefs(); closeDrawer(); renderPlanner();
+    }));
+  };
+  wireRows();
+
+  // Only the list is re-rendered, never the input — rebuilding the field would
+  // drop focus and the caret on every keystroke.
+  const q = $('#altQ');
+  const clear = $('#altClear');
+  let t = null;
+  const run = () => {
+    const v = q.value;
+    clear.hidden = !v;
+    $('#altList').innerHTML = listFor(v);
+    wireRows();
+  };
+  q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 90); });
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && q.value) { e.stopPropagation(); q.value = ''; run(); }
+  });
+  clear.addEventListener('click', () => { q.value = ''; run(); q.focus(); });
+  q.focus();
 }
 
 /* ═══════════════════ existing sections, engine-backed ════════════════ */
