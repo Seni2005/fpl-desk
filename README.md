@@ -9,15 +9,17 @@ vice, the bench order, the one transfer worth making, expected points, the hit i
 cost, how confident the recommendation is, and the biggest risk you are carrying. Every
 answer has a **Why?** that unfolds the evidence behind it.
 
-- **A gameweek banner that knows where the round is.** Red while matches are on, with the count of games played and in play; green once the round is done, counting down to the next deadline. Every recommendation on the page is tagged with the gameweek it applies to, so live points and next week's advice never get confused.
+- **A gameweek banner that knows where the round is.** Three states, not two: *live* while matches are on with the count played and in play, *final* once every match is done — which is most of the week, and where your gameweek points now stay — and *upcoming* once the next deadline passes and there is nothing to score yet. Every recommendation is tagged with the gameweek it applies to, so live points and next week's advice never get confused.
+- **Matches** — every Premier League fixture in the round, grouped by calendar day **in Sydney time**, with kickoff times, live clocks and scores where they exist, difficulty colouring on both clubs, and a marker on every match involving one of your players.
 - **Team health** — a 0-100 composite across expected points, fixtures, minutes security, value, injury risk and bench strength, with the weakest component named.
-- **Decision / Analyst modes** — Decision answers the question in plain language on clean cards, with colour-coded badges (🔥 high goal threat, 🎯 chance creator, 🚑 flagged) that each carry the number they came from. Analyst turns the same page back into an instrument: no cards, no shadows, full tables of xGI, xPts, fixture difficulty and simulated distributions. Nothing is removed in either direction — Decision folds the raw dumps away, Analyst unfolds them. The switch sits in the sticky header and is remembered between visits.
+- **Decision / Analyst modes** — the same terminal at two densities. Decision answers the question in plain language with colour-coded badges (🔥 high goal threat, 🎯 chance creator, 🚑 flagged) that each print the number they came from. Analyst adds the full tables of xGI, xPts, fixture difficulty and simulated distributions, and unfolds every raw dump. Nothing is deleted in either direction. The switch sits in the sticky header and is remembered between visits.
 - **Planner** — plot transfers across the next six gameweeks, run a Plan A against a Plan B, and see which is worth more once hits are paid. A first visit opens a four-step walkthrough.
 - **The formation sandbox** — the planner's editing surface is a pitch. Pick a gameweek, tap any player to get a ranked list of affordable replacements, and watch the bank update as you stage moves. Play a **Wildcard, Free Hit, Triple Captain or Bench Boost** and the projection recalculates immediately: free transfers for the week, a tripled armband, or all fifteen counting. One of each chip, one week at a time.
 - **What changed** — price moves, availability, form and ownership swings since the previous refresh, with your own players marked.
-- **Your squad** on a pitch in your actual formation. While matches are on, each card carries its live score — the captain's doubled and shown with the working (`👑 24 pts` over `12 pts × 2`) — alongside a running total for the round. Once the round finishes those numbers give way to the next fixture and venue, colour-coded by difficulty. Injury pins and price arrows throughout.
+- **Your squad** on a pitch in your actual formation, with its own status line saying whether the round is updating, final, or not started, and how fresh the numbers are. Each card carries its gameweek score — the captain's doubled and shown with the working (`👑 24 pts` over `12 pts × 2`) — and **keeps it until the next deadline**, with the next three fixtures colour-coded underneath the whole time. Injury pins and price arrows throughout.
 - **Your leagues** — every mini-league you're in with your position and how it moved. Tap one for the table, your row highlighted.
-- **Targets** — every player scored six ways (Overall, Short, Long, Value, Differential, Captain), each column sortable.
+- **Targets** — every player scored six ways (Overall, Short, Long, Value, Differential, Captain), each column sortable, each row carrying a sparkline of the last ten gameweeks and a caret that expands **in place** to fourteen underlying numbers (xG/90, xA/90, xGI/90, xGC/90, xMin, starts, BPS, defensive actions, ownership, EO, net transfers…) with a plain-language explanation on each.
+- **A price-against-points scatter** above the table, with both axes named in words, a median-value diagonal you read positionally, and a tooltip on every point. It follows the filters, so it always describes the list beneath it.
 - **Any player, in detail** — click a name anywhere for a breakdown of exactly why the algorithm rates him, what its main concern is, a simulated distribution for the next gameweek, previous seasons and upcoming fixtures.
 - **Price watch** with the financial impact on you, **fixture ticker** with swing markers, and the **injury board**.
 
@@ -46,9 +48,15 @@ touches no DOM, which means the same code runs in the browser and under `node --
 in the engine instead.
 
 ```bash
-npm test      # 58 unit tests over the engine
+npm test          # 59 unit tests over the engine
 npm run refresh   # run the fetcher locally
+npm run palette   # regenerate and re-verify the difficulty ramp
 ```
+
+`npm run palette` is the one that matters if you ever touch the fixture colours:
+it generates the five tiers at fixed lightness targets and then tries to break
+them — text contrast, monotonic lightness, and monotonic lightness under three
+colourblindness simulations. It prints PASS or FAIL. A FAIL is not shippable.
 
 Tests run in CI on every push that touches `js/`, `tests/` or `scripts/`. They are
 deliberately in a separate workflow from the data refresh, so a failing test never
@@ -183,13 +191,19 @@ On a phone the table drops to player, price and progress rather than scrolling s
 
 ## About the design
 
-The page has two personalities and the mode switch is what flips between them.
+**`DESIGN.md` is the full spec.** The short version:
 
-**Analyst** is the original rule: colour only ever means something — fixture difficulty, price direction, availability. Everything else is ink on paper, separated by rules rather than cards. No shadows, no rounded corners, no decoration. If something is coloured, it is data.
+It is a terminal, not a dashboard — a trading desk and a scoreboard, not a SaaS landing page. Three laws, all enforced by an automated audit that runs in both modes at four viewport widths:
 
-**Decision** relaxes that on purpose. Answers sit on cards with a little elevation, and status badges carry colour to make a squad readable at a glance. Every badge still prints the figure it was derived from — `🔥 High goal threat` is followed by `xG/90 0.82` — so the colour is a label on a number, never a substitute for one. The raw dumps aren't deleted in Decision, only folded away; switching to Analyst unfolds them.
+1. **Colour is data.** Fixture difficulty, direction of travel, availability, and whether a match involves your players. Nothing is coloured for decoration, which is what makes a coloured pixel worth stopping on.
+2. **Flat.** 1px rules, zero radius, zero shadow, zero gradient, zero blur. Depth is rule weight and ground value.
+3. **Figures are monospace.** Every number is JetBrains Mono with tabular figures, so columns align and a changed digit shows without reading the whole value.
 
-Contrast for every coloured chip was checked against a 4.5:1 target in both themes and both modes, and the difficulty chips print their number so they still read if the colours are hard to tell apart.
+Dark charcoal by default on every machine — deliberately not wired to your OS setting, because an analysis surface should not change value because the clock rolled over. INVERT gives you the light mirror and it is remembered.
+
+**The two modes differ by density and scope, not by style.** Decision hides the deep sections and folds the raw dumps away; Analyst restores them. Both are the same terminal. An earlier version made Decision a softer, card-based product and it read as two different apps.
+
+The fixture difficulty ramp was generated in OKLCH at fixed lightness targets so brightness descends monotonically across the five tiers. That is the accessibility guarantee: under total colour loss the ramp still reads in the right **order**, which a hue-only scale cannot do. Verified against deuteranope, protanope and tritanope simulations, with every text pair clearing 4.5:1 — and each chip still prints its difficulty digit as a second encoding.
 
 ## Chips in the planner
 
@@ -217,6 +231,9 @@ It knows nothing about press conferences, rotation risk in a cup week, or who ha
 | Path | What it is |
 |---|---|
 | `index.html` | Markup and styles |
+| `DESIGN.md` | The design system: type, colour, layout, affordances, chart rules |
+| `tools/palette.mjs` | Generates the difficulty ramp and proves it colourblind-safe |
+| `tools/cvd.mjs` | The contrast and colour-vision simulation used to check it |
 | `js/engine.js` | Every calculation. Pure, DOM-free, importable by Node |
 | `js/ui.js` | Fetching, rendering, wiring. No calculations |
 | `tests/` | Engine unit tests and a deterministic fixture |
@@ -233,5 +250,7 @@ It knows nothing about press conferences, rotation risk in a cup week, or who ha
 **Workflow fails with a permissions error** — Settings → Actions → General → Workflow permissions → **Read and write permissions**.
 
 **Scheduled runs stopped** — GitHub pauses schedules on repos with no activity for 60 days. Any commit, or one manual run, wakes it up.
+
+**You uploaded an update and the page looks unchanged** — look at the build number beside `FPL DESK` in the header. If it does not match the `<meta name="build">` in the `index.html` you uploaded, you are being served a cached page. Hard-refresh (Cmd/Ctrl + Shift + R), and check **Actions → pages-build-deployment** has actually finished; GitHub Pages can take a couple of minutes and its CDN a couple more. Every release bumps that number and the `?v=` on the scripts, so a half-updated site is not possible — only a fully stale one, which a refresh clears.
 
 **Squad panel is empty but everything else works** — `config.json` still has `"teamId": null`, or the ID has a typo. It should be a bare number with no quotes.
