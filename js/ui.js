@@ -9,9 +9,9 @@ import {
   buildContext, weeklyAdvice, teamHealth, optimalXI, captainRanking,
   transferAlternatives, evaluatePlan, categorise, fixtureSwings,
   ownershipOpportunity, templateDiff, simulatePlayer,
-  gameweekState, playerTraits, CHIPS,
+  gameweekState, playerTraits, CHIPS, matchSchedule,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB,
-} from './engine.js';
+} from './engine.js?v=8';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -190,22 +190,30 @@ function renderScoreBug() {
   const el = $('#scorebug');
   const e = CTX.entry;
   if (!e || !CTX.squad.length) { el.innerHTML = ''; return; }
-  const live = GW && GW.phase === 'live';
+  const phase = GW ? GW.phase : 'upcoming';
 
   const sides = [];
-  if (live) {
+  if (phase === 'live') {
     sides.push(['Played', `${GW.started}/${GW.total}`]);
     if (GW.inPlay) sides.push(['In play', String(GW.inPlay)]);
+  } else if (phase === 'settled' && GW.deadlineText) {
+    sides.push([`GW${GW.targetGw} deadline`, GW.deadlineText]);
   }
   sides.push(['Overall rank', compact(e.overallRank)]);
   sides.push(['Season', String(e.overallPoints)]);
   sides.push(['Bank', `£${e.bank.toFixed(1)}`]);
 
+  // Before a ball is kicked the gameweek total is zero and means nothing, so
+  // the bug leads with the squad's own value instead of a placeholder score.
+  const lead = phase === 'upcoming'
+    ? { lab: `GW${GW ? GW.targetGw : ''} squad value`, val: `£${(e.squadValue || 0).toFixed(1)}` }
+    : { lab: `GW${GW.scoresGw} ${phase === 'live' ? 'live' : 'final'}`, val: String(e.gwPoints) };
+
   el.innerHTML =
-    '<div class="scorebug">' +
+    `<div class="scorebug${phase === 'live' ? ' islive' : ''}">` +
       '<div class="bug-main">' +
-        `<span class="lab">${live ? `GW${GW.liveGw} live` : `GW${GW ? GW.liveGw : ''} final`}</span>` +
-        `<b>${e.gwPoints}</b>` +
+        `<span class="lab">${esc(lead.lab)}</span>` +
+        `<b>${esc(lead.val)}</b>` +
       '</div>' +
       '<div class="bug-side">' +
         sides.map(([k, v]) => `<div><span class="lab">${esc(k)}</span><b>${v}</b></div>`).join('') +
@@ -645,13 +653,22 @@ function openReplacements(outId, gw) {
 /**
  * A player on the pitch.
  *
- * The plate under the name changes with the round: while matches are on it
- * carries the live score, doubled for the captain and shown as the working.
- * Once the round is done that number is stale, so it gives way to the fixture
- * the player is actually about to play.
+ * The plate under the name follows the round.
+ *
+ *   live      the running score, doubled for the captain with the working
+ *             shown, so 24 is never mistaken for 12.
+ *   settled   the SAME number, held until the next deadline. This is the
+ *             window that used to blank the squad the instant the last
+ *             whistle went; the next fixture is still legible from the three
+ *             chips underneath, so nothing is lost by keeping the score.
+ *   upcoming  no score exists yet, so the plate carries the fixture instead.
+ *
+ * The sandbox overrides all of this with opts.projIdx, because it is editing
+ * a future week and any past score there would be the wrong number.
  */
 function manCard(p, pick, opts = {}) {
-  const live = GW && GW.phase === 'live';
+  const phase = GW ? GW.phase : 'upcoming';
+  const scored = phase === 'live' || phase === 'settled';
   // Real picks carry multiplier 2 (or 3 under Triple Captain). Fall back to the
   // captain flag so a card never shows an undoubled captain score.
   const mult = pick && pick.multiplier > 1 ? pick.multiplier : (pick && pick.captain ? 2 : 1);
@@ -672,9 +689,12 @@ function manCard(p, pick, opts = {}) {
     const xp = p.proj && p.proj[opts.projIdx] != null ? p.proj[opts.projIdx] : 0;
     plate = `<span class="sc proj" title="Projected points for GW${opts.gw}">` +
       `${xp.toFixed(1)}<small> xPts</small></span>`;
-  } else if (live) {
+  } else if (scored) {
     const base = p.gwPts || 0;
-    plate = `<span class="sc${mult > 1 ? ' dbl' : ''}">${base * mult}<small> pts</small>` +
+    const cls = 'sc' + (mult > 1 ? ' dbl' : '') + (phase === 'settled' ? ' fin' : '');
+    const title = `GW${GW.scoresGw} ${phase === 'settled' ? 'final' : 'so far'}` +
+      (mult > 1 ? ` — ${base} × ${mult}` : '');
+    plate = `<span class="${cls}" title="${esc(title)}">${base * mult}<small> pts</small>` +
       (mult > 1 ? `<span class="mult">${base} pts × ${mult}</span>` : '') + '</span>';
   } else {
     const nf = p.fixtures[0];
@@ -703,6 +723,23 @@ function manCard(p, pick, opts = {}) {
     `<span class="fixrow">${chips}</span></button>`;
 }
 
+/**
+ * What the squad panel is currently showing, in one phrase.
+ * `updating` is the honest word for the live phase: this page has no socket,
+ * so scores are as fresh as the last refresh and nothing more.
+ */
+function squadStatus() {
+  if (!GW) return { tone: 'idle', dot: '', label: 'Squad' };
+  if (GW.phase === 'live') {
+    return { tone: 'live', dot: '<i class="dot"></i>',
+      label: `GW${GW.scoresGw} updating · ${GW.inPlay ? `${GW.inPlay} in play` : `${GW.started}/${GW.total} played`}` };
+  }
+  if (GW.phase === 'settled') {
+    return { tone: 'done', dot: '', label: `GW${GW.scoresGw} final · all ${GW.total} played` };
+  }
+  return { tone: 'idle', dot: '', label: `GW${GW.targetGw} not started · showing fixtures` };
+}
+
 function renderSquad() {
   const e = CTX.entry;
   if (!CTX.squad.length) {
@@ -723,12 +760,21 @@ function renderSquad() {
 
   const shape = [lines.DEF.length, lines.MID.length, lines.FWD.length].join('-');
   const chips = e.chipsUsed && e.chipsUsed.length ? e.chipsUsed.map((c) => `${c.name} GW${c.gw}`).join(', ') : 'none used';
-  const gwName = CTX.snapshot.currentEvent ? 'GW' + CTX.snapshot.currentEvent.id : 'GW';
   const best = optimalXI(CTX.squad.map((s) => s.player), 0);
   const same = best && new Set(best.xi.map((p) => p.id)).size === 11 &&
     starters.every((s) => best.xi.some((p) => p.id === s.id));
-  $('#squadNote').textContent = `${e.name}  ·  ${shape}  ·  ${gwName} points  ·  ` +
-    (same ? 'matches the optimal XI' : `optimal is ${best ? best.formation : '—'}`) + `  ·  chips: ${chips}`;
+
+  /* The panel says what it is showing and how current that is. The global
+   * banner covers the whole page; this line answers the narrower question
+   * you actually have while looking at the pitch — are these numbers moving
+   * right now, are they final, or is this a fixture list? */
+  const st = squadStatus();
+  $('#squadNote').innerHTML =
+    `<span class="sq-state ${st.tone}">${st.dot}${esc(st.label)}</span>` +
+    `<span>${esc(shape)}</span>` +
+    `<span>${same ? 'matches optimal XI' : `optimal ${best ? best.formation : '—'}`}</span>` +
+    `<span>chips: ${esc(chips)}</span>` +
+    `<span class="gwage">${esc(freshness())}</span>`;
 
   let html = `<div class="pitch"><span class="shape">${shape}</span>`;
   ['GKP', 'DEF', 'MID', 'FWD'].forEach((pos) => {
@@ -914,13 +960,17 @@ function renderTargets() {
   });
   const CAP = 120;
   $('#targetNote').textContent = rows.length > CAP ? `top ${CAP} of ${rows.length}` : `${rows.length} player${rows.length === 1 ? '' : 's'}`;
+  renderScatter(rows);
 
   $('#targetRows').innerHTML = rows.slice(0, CAP).map((p) => {
     const t = TEAM.get(p.team) || {}, s = p.scores;
-    return `<tr>` +
-      `<td class="l"><span class="who" data-pid="${p.id}">${esc(p.name)}</span>${statusTag(p)}` +
+    return `<tr data-row="${p.id}">` +
+      `<td class="l"><button class="disc" data-open="${p.id}" aria-expanded="false"` +
+        ` aria-controls="drill${p.id}" title="Show ${esc(p.full)}'s underlying numbers"></button>` +
+      `<span class="who" data-pid="${p.id}">${esc(p.name)}</span>${statusTag(p)}` +
       (mine.has(p.id) ? catTag(p) : '') +
       `<span class="sub">${esc(t.short || '')} · ${p.pos}</span></td>` +
+      `<td class="spk hide-xs">${sparkline(p)}</td>` +
       `<td class="num">${p.price.toFixed(1)}</td>` +
       `<td class="num strong">${s.overall.toFixed(2)}</td>` +
       `<td class="num hide-xxs">${s.short.toFixed(2)}</td>` +
@@ -928,8 +978,165 @@ function renderTargets() {
       `<td class="num hide-sm">${s.value.toFixed(2)}</td>` +
       `<td class="num hide-sm">${s.differential.toFixed(2)}</td>` +
       `<td class="num hide-xs">${s.captain.toFixed(2)}</td>` +
-      `<td class="num hide-sm">${p.owned.toFixed(1)}</td></tr>`;
-  }).join('') || '<tr><td colspan="9" class="dimtxt" style="padding:30px 0;text-align:left">No players match.</td></tr>';
+      `<td class="num hide-sm">${p.owned.toFixed(1)}</td></tr>` +
+      `<tr class="drill" id="drill${p.id}" hidden><td colspan="10">${drillBody(p)}</td></tr>`;
+  }).join('') || '<tr><td colspan="10" class="dimtxt" style="padding:30px 0;text-align:left">No players match.</td></tr>';
+
+  $$('#targetRows .disc').forEach((b) => b.addEventListener('click', () => {
+    const row = $('#drill' + b.dataset.open);
+    const open = row.hidden;
+    row.hidden = !open;
+    b.setAttribute('aria-expanded', String(open));
+  }));
+}
+
+/* ═══════════════════════════ the scatter ════════════════════════════ */
+
+/**
+ * Price against projected points, for the players currently filtered.
+ *
+ * The chart answers one question a table cannot: who is cheap for what they
+ * produce. That is a two-variable comparison, and a ranked column can only
+ * ever show one variable at a time.
+ *
+ * Three things make it readable without a stats background:
+ *   · both axes are named in words with units, not symbols;
+ *   · a value line runs through the origin at the median points-per-million,
+ *     so "above the line" literally means better value than the middle of
+ *     this list — the reading is positional, not numerical;
+ *   · every point is a link with a title, and your own players are ringed.
+ */
+function renderScatter(rows) {
+  const el = $('#scatter');
+  const pts = rows.slice(0, 90).filter((p) => p.scores.overall > 0);
+  if (pts.length < 6) { el.innerHTML = ''; el.hidden = true; return; }
+  el.hidden = false;
+
+  const W = 900, H = 260, L = 46, R = 12, T = 14, B = 34;
+  const xs = pts.map((p) => p.price), ys = pts.map((p) => p.scores.overall);
+  const x0 = Math.floor(Math.min(...xs) * 2) / 2 - 0.2, x1 = Math.ceil(Math.max(...xs) * 2) / 2 + 0.2;
+  const y0 = 0, y1 = Math.ceil(Math.max(...ys) * 1.1 * 2) / 2;
+  const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R);
+  const Y = (v) => H - B - ((v - y0) / (y1 - y0)) * (H - T - B);
+
+  const ratios = pts.map((p) => p.scores.overall / p.price).sort((a, b) => a - b);
+  const med = ratios[Math.floor(ratios.length / 2)];
+
+  const xticks = [];
+  for (let v = Math.ceil(x0); v <= x1; v += x1 - x0 > 8 ? 2 : 1) xticks.push(v);
+  const yticks = [];
+  for (let v = 0; v <= y1; v += y1 > 8 ? 2 : 1) yticks.push(v);
+
+  const mine = new Set(CTX.squad.map((s) => s.id));
+  const dots = pts.map((p) => {
+    const t = TEAM.get(p.team) || {};
+    const good = p.scores.overall / p.price > med;
+    return `<circle class="dot ${good ? 'up' : 'dn'}${mine.has(p.id) ? ' mine' : ''}" ` +
+      `cx="${X(p.price).toFixed(1)}" cy="${Y(p.scores.overall).toFixed(1)}" r="4" ` +
+      `data-pid="${p.id}" tabindex="0" role="button"><title>${esc(p.full)} · ${esc(t.short || '')} ${p.pos}\n` +
+      `£${p.price.toFixed(1)}m · ${p.scores.overall.toFixed(2)} projected points per gameweek\n` +
+      `${(p.scores.overall / p.price).toFixed(2)} points per £1m — ${good ? 'above' : 'below'} the median of this list` +
+      `</title></circle>`;
+  }).join('');
+
+  el.innerHTML =
+    '<div class="sc-head"><span class="lab">Price against projected points</span>' +
+      `<span class="sc-key"><i class="k up"></i>better value than the median` +
+      `<i class="k dn"></i>worse<i class="k mine"></i>yours</span></div>` +
+    `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" ` +
+      `aria-label="Scatter plot of price against projected points for ${pts.length} players. ` +
+      `Points above the diagonal give more expected points per pound than the median.">` +
+      yticks.map((v) => `<g><line class="grid" x1="${L}" y1="${Y(v)}" x2="${W - R}" y2="${Y(v)}"/>` +
+        `<text class="ax" x="${L - 7}" y="${Y(v) + 3.5}" text-anchor="end">${v}</text></g>`).join('') +
+      xticks.map((v) => `<text class="ax" x="${X(v)}" y="${H - B + 15}" text-anchor="middle">£${v}</text>`).join('') +
+      `<line class="medline" x1="${X(x0)}" y1="${Y(x0 * med)}" x2="${X(x1)}" y2="${Y(Math.min(y1, x1 * med))}"/>` +
+      `<text class="medlab" x="${W - R - 4}" y="${Math.max(T + 10, Y(Math.min(y1, x1 * med)) - 6)}" text-anchor="end">` +
+        `median value · ${med.toFixed(2)} pts per £1m</text>` +
+      dots +
+      `<text class="axlab" x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle">Price (£m)</text>` +
+      `<text class="axlab" transform="translate(11 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">` +
+        `Projected points per gameweek</text>` +
+    '</svg>';
+
+  $$('#scatter .dot').forEach((c) => {
+    const open = () => openPlayer(Number(c.dataset.pid));
+    c.addEventListener('click', open);
+    c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+  });
+}
+
+/* ═══════════════ progressive disclosure and in-row charts ═══════════════ */
+
+/**
+ * The second layer of the table. Everything here is derived from figures the
+ * snapshot already carries — no estimate is introduced at this level, because
+ * a number you had to drill for should be the most trustworthy one on screen.
+ * xMin is the exception and is labelled as a projection.
+ */
+function drillBody(p) {
+  const t = TEAM.get(p.team) || {};
+  const cells = [
+    ['xG / 90', p.per90.xG.toFixed(2), 'expected goals per 90 minutes. Includes penalties — FPL does not publish a non-penalty split.'],
+    ['xA / 90', p.per90.xA.toFixed(2), 'expected assists per 90 minutes'],
+    ['xGI / 90', p.per90.xGI.toFixed(2), 'goal involvements: xG and xA together'],
+    ['xGC / 90', p.per90.xGC.toFixed(2), 'expected goals conceded by his team per 90 — lower is a better clean-sheet bet'],
+    ['xMin', Math.round((p.minsPct || 0) * 90) + "'", 'projected minutes: his share of available minutes so far, applied to a full match'],
+    ['Starts', `${p.starts || 0}/${CTX.gwPlayed}`, 'matches started out of matches played'],
+    ['Minutes', String(p.mins || 0), 'total minutes this season'],
+    ['BPS', String(p.bps || 0), 'bonus point system total — the raw score bonus is awarded from'],
+    ['Def. actions', String(p.defCon || 0), 'defensive contributions: the tackles-and-interceptions metric FPL scores from'],
+    ['Form', String(p.form || 0), 'FPL form: average points over the last 30 days'],
+    ['Owned', p.owned.toFixed(1) + '%', 'share of all managers who own him'],
+    ['EO', p.eo.toFixed(1) + '%', 'effective ownership: ownership plus an ESTIMATE of captaincy, which FPL does not publish'],
+    ['Net transfers', (p.net > 0 ? '+' : '') + compact(p.net), 'transfers in minus out this gameweek'],
+    ['Season Δ', (p.seasonDelta > 0 ? '+' : '') + p.seasonDelta.toFixed(1), 'price change since the season started'],
+  ];
+  const fx = p.fixtures.map((f, i) => {
+    if (f.blank) return `<span class="fx f3">GW${f.gw} —</span>`;
+    const g = f.games[0], o = TEAM.get(g.opp) || {};
+    const nm = g.home ? (o.short || '').toUpperCase() : (o.short || '').toLowerCase();
+    return `<span class="fx f${Math.round(f.difficulty)}" title="GW${f.gw} · difficulty ${f.difficulty}">${esc(nm)}<small>${Math.round(f.difficulty)}</small></span>`;
+  }).join('');
+  return '<div class="drill-in">' +
+    `<div class="drill-h"><span class="lab">${esc(p.full)} · ${esc(t.name || '')}</span>` +
+      `<button class="linkbtn" data-pid="${p.id}">Full breakdown</button></div>` +
+    '<div class="drill-grid">' + cells.map(([k, v, tip]) =>
+      `<div class="dcell" title="${esc(tip)}"><span class="lab">${esc(k)}</span><b>${esc(v)}</b></div>`).join('') +
+    '</div>' +
+    `<div class="drill-fx"><span class="lab">Next ${p.fixtures.length}</span>${fx}` +
+      `<span class="proj">projected ${p.proj.map((v) => v.toFixed(1)).join(' · ')} pts</span></div>` +
+    '</div>';
+}
+
+/**
+ * Points per gameweek so far, as a bar sparkline.
+ *
+ * Bars rather than a line: gameweek points are discrete events, and a line
+ * between them implies a continuum that does not exist. A blank (no fixture)
+ * is drawn as a hairline at the baseline so it reads as "no match", not "nil".
+ * Every bar carries its own title, so the chart is inspectable without a
+ * tooltip library.
+ */
+function sparkline(p) {
+  const d = DETAILS[p.id];
+  if (!d || !d.gws || d.gws.length < 2) return '<span class="spk-none" title="no per-gameweek history stored for this player">—</span>';
+  const g = d.gws.slice(-10);
+  const max = Math.max(4, ...g.map((x) => x.pts || 0));
+  const W = 62, H = 16, gap = 1;
+  const bw = (W - gap * (g.length - 1)) / g.length;
+  const bars = g.map((x, i) => {
+    const v = x.pts || 0;
+    const h = Math.max(v === 0 ? 1 : 2, (v / max) * H);
+    const cls = v >= 8 ? 'hi' : v >= 4 ? 'mid' : v > 0 ? 'lo' : 'nil';
+    const o = TEAM.get(x.opp) || {};
+    return `<rect class="sp ${cls}" x="${(i * (bw + gap)).toFixed(1)}" y="${(H - h).toFixed(1)}" ` +
+      `width="${bw.toFixed(1)}" height="${h.toFixed(1)}"><title>GW${x.gw} ` +
+      `${x.home ? 'v' : 'at'} ${esc(o.short || '?')} — ${v} pts, ${x.mins}'</title></rect>`;
+  }).join('');
+  const last = g[g.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" ` +
+    `aria-label="Points in the last ${g.length} gameweeks, most recent ${last.pts}">` +
+    `<line class="spbase" x1="0" y1="${H - 0.5}" x2="${W}" y2="${H - 0.5}"/>${bars}</svg>`;
 }
 
 function renderTicker() {
@@ -1163,10 +1370,11 @@ function wire() {
     prefs.activePlan = to; savePrefs(); renderPlanner();
   });
 
+  // Dark is the default with no media query behind it, so "currently dark"
+  // means simply: no explicit light choice on the root.
   $('#themeBtn').addEventListener('click', () => {
-    const dark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-      (!prefs.theme && matchMedia('(prefers-color-scheme: dark)').matches);
-    prefs.theme = dark ? 'light' : 'dark';
+    const light = document.documentElement.getAttribute('data-theme') === 'light';
+    prefs.theme = light ? 'dark' : 'light';
     applyTheme(); savePrefs();
   });
 
@@ -1212,6 +1420,88 @@ function showModeHint(which) {
 }
 function hideModeHint() { clearTimeout(hintTimer); $('#modehint').classList.remove('on'); }
 
+/* ══════════════════════ the match schedule ═════════════════════ */
+
+/** Sydney, because that is where this is read. Everything else is UTC. */
+const TZ = 'Australia/Sydney';
+let MS_GW = null;
+
+const tzTime = (iso) => new Date(iso).toLocaleTimeString('en-AU',
+  { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+
+/** "Sat 30 Aug", or "Today" / "Tomorrow" when that is the more useful label. */
+function dayLabel(key) {
+  const f = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const today = f.format(new Date());
+  const tmr = f.format(new Date(Date.now() + 864e5));
+  if (key === today) return 'Today';
+  if (key === tmr) return 'Tomorrow';
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-AU',
+    { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function renderMatches() {
+  const sec = $('#matches');
+  if (!GW) { sec.hidden = true; return; }
+
+  // The rounds worth offering: the one being played, and the one you can
+  // still act on. During a live round those differ, which is exactly when
+  // you want both.
+  const opts = [];
+  if (GW.scoresGw != null) opts.push(GW.scoresGw);
+  if (GW.targetGw != null && !opts.includes(GW.targetGw)) opts.push(GW.targetGw);
+  if (!opts.length) { sec.hidden = true; return; }
+  if (MS_GW == null || !opts.includes(MS_GW)) MS_GW = GW.phase === 'live' ? GW.scoresGw : opts[opts.length - 1];
+
+  const sched = matchSchedule(CTX, MS_GW, TZ);
+  sec.hidden = sched.count === 0;
+  if (!sched.count) return;
+
+  $('#msGw').innerHTML = opts.map((g) =>
+    `<button data-msgw="${g}" aria-pressed="${g === MS_GW}">GW${g}</button>`).join('');
+  const anyLive = sched.days.some((d) => d.matches.some((m) => m.inPlay));
+  $('#msNote').textContent =
+    `${sched.count} matches · ${sched.yours} with your players · Sydney time` +
+    (anyLive ? ` · clocks ${freshness()}` : '');
+
+  $('#msBody').innerHTML = sched.days.map((d) => {
+    const rows = d.matches.map((m) => {
+      const hs = m.home ? m.home.short : '???';
+      const as = m.away ? m.away.short : '???';
+      // state cell: the clock while it runs, FT after, kickoff time before
+      let state, cls, tip;
+      if (m.inPlay) {
+        state = `${m.minutes}'`; cls = 'ms-live';
+        // The clock is only as fresh as the last refresh — say so rather than
+        // letting a static number read as a live ticker.
+        tip = `${m.minutes} minutes played as of the last refresh (${freshness()})`;
+      } else if (m.finished) { state = 'FT'; cls = 'ms-done'; tip = 'Full time'; }
+      else { state = tzTime(m.ko); cls = 'ms-soon'; tip = `Kick-off ${tzTime(m.ko)} Sydney`; }
+      const score = m.started
+        ? `<span class="ms-score">${m.hScore == null ? '–' : m.hScore}<i>–</i>${m.aScore == null ? '–' : m.aScore}</span>`
+        : '<span class="ms-v">v</span>';
+      const chip = (t, d2) => d2 == null
+        ? `<span class="ms-fdr none" title="difficulty not published for this round">${esc(t)}</span>`
+        : `<span class="ms-fdr f${Math.round(d2)}" title="Difficulty ${d2} — ${FDR_WORD[Math.round(d2)]}">${esc(t)}<small>${Math.round(d2)}</small></span>`;
+      return `<div class="ms-row${m.yours ? ' mine' : ''}${m.inPlay ? ' onnow' : ''}">` +
+        `<span class="ms-state ${cls}" title="${esc(tip)}">${esc(state)}</span>` +
+        `<span class="ms-side h${m.yourSide === 'h' || m.yourSide === 'both' ? ' you' : ''}">${chip(hs, m.dh)}</span>` +
+        score +
+        `<span class="ms-side a${m.yourSide === 'a' || m.yourSide === 'both' ? ' you' : ''}">${chip(as, m.da)}</span>` +
+        `<span class="ms-names">${esc(m.home ? m.home.name : '')} <i>v</i> ${esc(m.away ? m.away.name : '')}</span>` +
+        '</div>';
+    }).join('');
+    const n = d.matches.length;
+    return `<div class="ms-day"><div class="ms-daylab"><span class="lab">${esc(dayLabel(d.key))}</span>` +
+      `<span class="ms-count">${n} match${n === 1 ? '' : 'es'}</span></div>${rows}</div>`;
+  }).join('');
+
+  $$('#msGw [data-msgw]').forEach((b) => b.addEventListener('click', () => {
+    MS_GW = Number(b.dataset.msgw); renderMatches();
+  }));
+}
+
 /** Everything that depends on data or mode. Called on boot and on mode change. */
 function renderAll() {
   renderGwBanner();
@@ -1219,6 +1509,7 @@ function renderAll() {
   renderDashboard();
   renderScoreBug();
   renderSquad();
+  renderMatches();
   renderLeagues();
   renderPlanner();
   renderChanges();
@@ -1232,6 +1523,13 @@ function renderAll() {
 /* ──────────────────────────── boot ──────────────────────────────────── */
 
 applyTheme();
+// Surface the build the browser actually loaded, so a stale cache is visible
+// rather than mysterious.
+(() => {
+  const m = document.querySelector('meta[name="build"]');
+  const el = document.getElementById('buildTag');
+  if (m && el) el.textContent = 'b' + m.content;
+})();
 const bust = '?v=' + Date.now();
 const grab = (f, fallback) => fetch(f + bust).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
 
