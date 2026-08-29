@@ -5,6 +5,10 @@ on:
     # Every 3 hours. FPL prices change around 01:30 UTC, so the 02:00 run
     # catches them within half an hour.
     - cron: "0 */3 * * *"
+    # Weekend match windows, every 15 minutes. GitHub runs scheduled workflows
+    # on a best-effort basis and often lags 5-15 minutes, so live points are
+    # minutes old rather than seconds — the interface says which.
+    - cron: "*/15 11-22 * * 6,0"
   workflow_dispatch: # lets you refresh on demand from the Actions tab
   push:
     branches: [main]
