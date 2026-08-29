@@ -91,12 +91,39 @@ export function makeSnapshot(opts = {}) {
   const bench = squadIds.filter((x) => !order.includes(x));
   const finalOrder = [...order, ...bench];
 
+  // Live block, as the fetcher writes it. `live: 'inplay'` puts matches on the
+  // pitch; the default has the round finished and the next deadline ahead.
+  const mkFixtures = (started, finished) =>
+    Array.from({ length: 10 }, (_, i) => ({
+      id: i + 1, h: (i * 2) % 20 + 1, a: (i * 2 + 1) % 20 + 1,
+      kickoff: '2026-08-22T14:00:00Z',
+      started: i < started, finished: i < finished, provisional: i < finished,
+      minutes: i < finished ? 90 : i < started ? 62 : 0,
+      hScore: i < started ? 1 : null, aScore: i < started ? 0 : null,
+    }));
+  const liveMode = opts.live || 'finished';
+  const liveFixtures = liveMode === 'inplay' ? mkFixtures(6, 2)
+    : liveMode === 'none' ? mkFixtures(0, 0)
+    : mkFixtures(10, 10);
+
   return {
     generatedAt: new Date('2026-08-28T09:00:00Z').toISOString(),
     season: '2026/27',
     totalManagers: 8000000,
-    currentEvent: { id: 1, name: 'Gameweek 1', finished: true },
+    currentEvent: { id: 1, name: 'Gameweek 1', finished: liveMode === 'finished' },
     nextEvent: { id: 2, name: 'Gameweek 2', deadline: '2026-08-28T17:30:00Z' },
+    live: {
+      gw: 1,
+      deadline: '2026-08-21T17:30:00Z',
+      finished: liveMode === 'finished',
+      dataChecked: liveMode === 'finished',
+      fixtures: liveFixtures,
+      started: liveFixtures.filter((f) => f.started).length,
+      inPlay: liveFixtures.filter((f) => f.started && !f.finished).length,
+      total: liveFixtures.length,
+      allFinished: liveFixtures.every((f) => f.finished),
+      nextKickoff: (liveFixtures.find((f) => !f.started) || {}).kickoff || null,
+    },
     horizonFrom: gws[0],
     horizon: gws.length,
     events: gws.map((g) => ({ id: g, name: `Gameweek ${g}`, deadline: '2026-09-01T17:30:00Z' })),
