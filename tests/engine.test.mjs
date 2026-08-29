@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeSnapshot } from './fixture.mjs';
 import {
   FORMATIONS, SQUAD_SHAPE, MAX_PER_CLUB, HIT_COST, FIELD_SIGMA_GW,
-  buildContext, optimalXI, teamHealth, categorise, transferAlternatives,
+  buildContext, optimalXI, teamHealth, categorise, transferAlternatives, replacementOptions,
   evaluatePlan, captainRanking, captainRankImpact, rankShift, fixtureSwings,
   weeklyAdvice, ownershipOpportunity, templateSquad, templateDiff,
   simulatePlayer, availability, underlyingRate, longAvailability,
@@ -776,4 +776,92 @@ test('an older single-entry snapshot still works', () => {
   assert.equal(c.entries.length, 1);
   assert.equal(c.entry.id, 1234567);
   assert.equal(c.squad.length, 15);
+});
+
+/* ─────────────── searching for any replacement, not just the shortlist ─────────────── */
+
+test('the shortlist is what you can actually make', () => {
+  const out = ctx.squad[3].player;
+  const alts = transferAlternatives(out, ctx, 2.0, ctx.squad.map((s) => s.id), 8);
+  assert.ok(alts.length > 0);
+  for (const a of alts) {
+    assert.equal(a.player.pos, out.pos, 'like for like');
+    assert.equal(a.legal, true, 'every shortlisted option is legal');
+    assert.equal(a.player.status, 'a', 'and available');
+  }
+  const gains = alts.map((a) => a.gain);
+  assert.deepEqual(gains, gains.slice().sort((x, y) => y - x), 'ranked by gain');
+});
+
+test('search reaches players the shortlist would never offer', () => {
+  const out = ctx.squad[3].player;
+  const ids = ctx.squad.map((s) => s.id);
+  const short = transferAlternatives(out, ctx, 0.5, ids, 12).map((a) => a.player.id);
+  const all = replacementOptions(out, ctx, 0.5, ids, { query: out.pos });
+  assert.ok(all.length > short.length,
+    `search sees ${all.length} where the shortlist offers ${short.length}`);
+  assert.ok(all.some((r) => !short.includes(r.player.id)),
+    'including players outside the shortlist entirely');
+});
+
+test('nothing is silently dropped — every exclusion carries its reason', () => {
+  const out = ctx.squad.find((s) => s.player.pos === 'MID').player;
+  const ids = ctx.squad.map((s) => s.id);
+  // a tiny budget so the budget block definitely fires
+  const rows = replacementOptions(out, ctx, 0, ids, { query: '' });
+  for (const r of rows) {
+    if (r.legal) assert.equal(r.blocked, null);
+    else assert.ok(r.blockedText && r.blockedText.length > 3, 'a blocked row explains itself');
+  }
+  const kinds = new Set(rows.filter((r) => !r.legal).map((r) => r.blocked));
+  assert.ok(kinds.has('budget'), 'an unaffordable player is shown as unaffordable, not hidden');
+});
+
+test('a player you already own is offered back with that reason, not omitted', () => {
+  const out = ctx.squad.find((s) => s.player.pos === 'MID').player;
+  const ids = ctx.squad.map((s) => s.id);
+  const mate = ctx.squad.find((s) => s.player.pos === 'MID' && s.id !== out.id).player;
+  const rows = replacementOptions(out, ctx, 99, ids, { query: mate.name.toLowerCase() });
+  const hit = rows.find((r) => r.player.id === mate.id);
+  assert.ok(hit, 'a squad-mate is findable by name');
+  assert.equal(hit.blocked, 'owned');
+  assert.equal(hit.legal, false);
+});
+
+test('the wrong position is a block, not an omission', () => {
+  const out = ctx.squad.find((s) => s.player.pos === 'DEF').player;
+  const rows = replacementOptions(out, ctx, 99, ctx.squad.map((s) => s.id), { query: 'fwd' });
+  assert.ok(rows.length > 0, 'searching another position still returns players');
+  const wrong = rows.filter((r) => r.player.pos !== out.pos);
+  assert.ok(wrong.length > 0);
+  for (const r of wrong) {
+    assert.equal(r.blocked, 'position');
+    // the chip stays short enough not to wrap; the sentence lives in the tooltip
+    assert.ok(r.blockedText.length <= 18, `chip is short: "${r.blockedText}"`);
+    assert.match(r.blockedText, new RegExp(`^${r.player.pos}`));
+    assert.match(r.blockedWhy, /like-for-like/);
+    assert.equal(r.fixable, false, 'nothing you can do clears a position mismatch');
+  }
+});
+
+test('position outranks budget when both would block', () => {
+  // A striker cannot replace a defender however much money you have, so the
+  // reason shown must be the one you cannot solve by selling someone.
+  const out = ctx.squad.find((s) => s.player.pos === 'DEF').player;
+  const rows = replacementOptions(out, ctx, 0, ctx.squad.map((s) => s.id), { query: 'fwd' });
+  const wrong = rows.filter((r) => r.player.pos !== out.pos);
+  assert.ok(wrong.length > 0);
+  assert.ok(wrong.every((r) => r.blocked === 'position'), 'never reported as merely unaffordable');
+});
+
+test('results band by what you can act on', () => {
+  // buyable now, then blocked-but-solvable (money, club limit), then never.
+  const out = ctx.squad.find((s) => s.player.pos === 'MID').player;
+  const rows = replacementOptions(out, ctx, 3, ctx.squad.map((s) => s.id), { query: 'e' });
+  const band = (r) => (r.legal ? 0 : r.fixable ? 1 : 2);
+  const bands = rows.map(band);
+  assert.deepEqual(bands, bands.slice().sort((a, b) => a - b),
+    'bands never interleave');
+  assert.ok(bands.includes(0) && bands.includes(2),
+    'the search spans both what you can buy and what the rules forbid');
 });
