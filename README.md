@@ -31,7 +31,7 @@ The FPL API sends no CORS headers, so a web page cannot call it directly from a 
 GitHub Actions (every 3 hours; every 15 min during weekend match windows)
   └─ scripts/fetch.mjs  ── calls the FPL API; also diffs against the previous
        │                    refresh and appends to the time series
-       ├─ data/snapshot.json  ── players, teams, fixtures, your squad, leagues
+       ├─ data/snapshot.json  ── players, teams, fixtures, every squad, leagues
        ├─ data/details.json   ── season-by-season and per-gameweek history
        ├─ data/changes.json   ── what moved since the last refresh
        └─ data/timeline.json  ── one row per player per gameweek
@@ -48,7 +48,7 @@ touches no DOM, which means the same code runs in the browser and under `node --
 in the engine instead.
 
 ```bash
-npm test          # 59 unit tests over the engine
+npm test          # 66 unit tests over the engine
 npm run refresh   # run the fetcher locally
 npm run palette   # regenerate and re-verify the difficulty ramp
 ```
@@ -62,7 +62,7 @@ Tests run in CI on every push that touches `js/`, `tests/` or `scripts/`. They a
 deliberately in a separate workflow from the data refresh, so a failing test never
 stops the snapshot updating.
 
-Season history is one API call per player, so it is pulled for your fifteen plus the 180 most-owned players rather than all 700. Click a player outside that set and the panel says so rather than inventing numbers.
+Season history is one API call per player, so it is pulled for everyone's fifteen plus the 180 most-owned players rather than all 700. Click a player outside that set and the panel says so rather than inventing numbers.
 
 ## Setting it up
 
@@ -108,10 +108,45 @@ fantasy.premierleague.com/entry/1234567/event/2
 Open `config.json` in your repo, click the pencil, and set it:
 
 ```json
-{ "teamId": 1234567 }
+{ "teams": [ { "name": "Me", "id": 1234567 } ] }
 ```
 
 Commit. Saving that file kicks off a refresh by itself, so your squad appears within a minute or two. Without it every other part of the page still works — you just don't get the squad panel or the "owned" markers.
+
+## Sharing it with a friend
+
+Add him to the same list:
+
+```json
+{ "teams": [
+    { "name": "Seni", "id": 1234567 },
+    { "name": "Alex", "id": 7654321 }
+] }
+```
+
+Commit, and send him your normal link. With two or more people listed the page
+opens by asking **whose team** — his name, his squad, his planner, his leagues.
+
+- He needs no GitHub account and no setup. He gives you his team ID once; that
+  is the whole job.
+- **It asks every visit rather than remembering.** On a link two people share, a
+  remembered choice quietly shows you someone else's squad and you would not
+  notice it was wrong.
+- Choosing puts `?team=…` in the address bar, so you can copy that link and
+  send it to someone to land them straight on their own squad.
+- **Switch any time** with the name in the top-right of the header.
+- Add as many people as you like. The heavy data — players, prices, fixtures,
+  history — is fetched once no matter how many of you there are; each extra
+  person costs three API calls plus one per mini-league.
+
+A note on what this exposes: FPL squads are already public — anyone can look up
+any team ID on the FPL site — so a shared link shows nothing that was private to
+begin with. Nobody can change anyone's team from here either; the planner is a
+sandbox and never touches the real thing.
+
+**If he'd rather have his own copy**, he can fork the repo, put only his own ID
+in `config.json`, and follow steps 1–5 above. He gets his own URL and his own
+refresh schedule, entirely separate from yours.
 
 ## Day to day
 
@@ -239,7 +274,7 @@ It knows nothing about press conferences, rotation risk in a cup week, or who ha
 | `tests/` | Engine unit tests and a deterministic fixture |
 | `scripts/fetch.mjs` | Pulls the FPL API and writes the snapshot |
 | `.github/workflows/refresh.yml` | The schedule that runs the fetch |
-| `config.json` | Your team ID |
+| `config.json` | The team IDs of everyone who uses the page |
 | `data/snapshot.json` | Generated. Never edit it by hand |
 | `data/details.json` | Generated. Season-by-season history |
 
@@ -253,4 +288,6 @@ It knows nothing about press conferences, rotation risk in a cup week, or who ha
 
 **You uploaded an update and the page looks unchanged** — look at the build number beside `FPL DESK` in the header. If it does not match the `<meta name="build">` in the `index.html` you uploaded, you are being served a cached page. Hard-refresh (Cmd/Ctrl + Shift + R), and check **Actions → pages-build-deployment** has actually finished; GitHub Pages can take a couple of minutes and its CDN a couple more. Every release bumps that number and the `?v=` on the scripts, so a half-updated site is not possible — only a fully stale one, which a refresh clears.
 
-**Squad panel is empty but everything else works** — `config.json` still has `"teamId": null`, or the ID has a typo. It should be a bare number with no quotes.
+**Squad panel is empty but everything else works** — either you haven't picked a squad yet (use the name in the top-right), or `config.json` has no valid `id`. It should be a bare number with no quotes.
+
+**A name is greyed out in the chooser** — that team ID failed to fetch on the last refresh, usually a typo in the ID. Everyone else is unaffected; fix the number and the next refresh picks it up.
