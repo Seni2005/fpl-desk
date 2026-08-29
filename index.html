@@ -425,7 +425,140 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
   .sub{margin-left:6px;font-size:9.5px}
   #priceRows td.l,#targetRows td.l{max-width:46vw;overflow:hidden;text-overflow:ellipsis}
 }
+@media (max-width:430px){
+  /* Six score columns will not fit a small phone. Overall and Long are the two
+     that drive a decision, so Short steps aside before the layout breaks. */
+  .hide-xxs{display:none}
+  #targetRows td.l,#priceRows td.l{max-width:38vw}
+  tbody td,thead th{padding-left:5px;padding-right:5px}
+  tbody td.l,thead th.l{padding-left:0}
+}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ══════════════ iteration 2 — decision layer ══════════════ */
+
+/* Decision mode strips the page back to instructions; Analyst mode restores
+   the evidence. One attribute on the root drives it. */
+[data-mode="decision"] .analyst-only{display:none}
+.modeSeg{display:inline-flex;border:1px solid var(--rule-2);margin-left:auto;flex-shrink:0}
+.modeSeg button{padding:4px 10px;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-3);border-right:1px solid var(--rule-2)}
+.modeSeg button:last-child{border-right:none}
+.modeSeg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+
+/* ── headline ── */
+.headline{border-left:3px solid var(--ink);padding:2px 0 2px 18px;margin-bottom:26px}
+.hl-text{font-family:"Familjen Grotesk",sans-serif;font-size:clamp(19px,2.6vw,26px);font-weight:600;
+  letter-spacing:-.025em;line-height:1.22;margin:8px 0 0;max-width:34ch}
+.hl-players{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.chipbtn{border:1px solid var(--rule-2);padding:3px 8px;font-size:12px;font-weight:600;white-space:nowrap}
+.chipbtn span{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);margin-left:5px}
+.chipbtn:hover{background:var(--ink);color:var(--paper)}
+.chipbtn:hover span{color:var(--paper);opacity:.7}
+
+/* ── health ── */
+.health{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 40px;align-items:start;
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:20px 0;margin-bottom:26px}
+.hs-num{display:flex;flex-direction:column;min-width:118px}
+.hs-num b{font-family:"IBM Plex Mono",monospace;font-size:56px;font-weight:500;letter-spacing:-.06em;line-height:.86;margin-top:8px}
+.hs-num b.good{color:var(--up)} .hs-num b.bad{color:var(--dn)}
+.hs-num .of{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);margin-top:6px}
+.hs-bars{display:flex;flex-direction:column;gap:7px;padding-top:4px}
+.hs-row{display:grid;grid-template-columns:132px minmax(0,1fr) 34px;gap:12px;align-items:center;font-size:12.5px}
+.hs-k{color:var(--ink-2)}
+.hs-t{height:7px;background:var(--paper-3);position:relative}
+.hs-t i{position:absolute;inset:0 auto 0 0;background:var(--ink-3)}
+.hs-t i.good{background:var(--up)} .hs-t i.ok{background:var(--ink-3)} .hs-t i.bad{background:var(--dn)}
+.hs-v{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);text-align:right}
+.hs-weak{grid-column:1/-1;margin:16px 0 0;font-size:13.5px;color:var(--ink-2);max-width:70ch}
+.hs-weak .lab{margin-right:8px}
+
+/* ── the answer list ── */
+.answers{border-top:1px solid var(--rule)}
+.ans{display:grid;grid-template-columns:130px minmax(0,1fr) auto;gap:18px;align-items:baseline;
+  padding:13px 0;border-bottom:1px solid var(--rule)}
+.ans-q{padding-top:3px}
+.ans-a{font-size:16px;font-weight:600;letter-spacing:-.01em;min-width:0}
+.ans-d{margin-top:7px;display:flex;gap:5px;flex-wrap:wrap;font-weight:400}
+.ans-sub{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);font-weight:400;letter-spacing:.02em}
+.whybtn{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);border:1px solid var(--rule-2);padding:3px 8px;align-self:start}
+.whybtn:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.why{grid-column:2/-1;font-size:13px;color:var(--ink-2);line-height:1.6;padding-top:10px;max-width:74ch}
+.assume{display:block;margin-top:8px;font-family:"IBM Plex Mono",monospace;font-size:11px;
+  color:var(--ink-3);line-height:1.55}
+
+/* ── what changed ── */
+.chgwrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:0 34px}
+.chg{border-top:1px solid var(--rule);padding-top:11px;margin-bottom:22px}
+.chg .lab{display:flex;align-items:baseline;gap:7px;margin-bottom:9px}
+.chg .lab i{font-style:normal;color:var(--ink-2)}
+.chg ul{list-style:none;margin:0;padding:0}
+.chg li{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid var(--rule);font-size:13px}
+.chg li:last-child{border-bottom:none}
+.chg li.own{font-weight:600}
+.chg-v{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11px;white-space:nowrap;
+  max-width:54%;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.chg-v.u{color:var(--up)} .chg-v.d{color:var(--dn)}
+
+/* ── multi-week planner ── */
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:0;
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);margin-bottom:2px}
+.cmp-col,.cmp-delta{padding:15px 22px 15px 0;margin-right:22px;border-right:1px solid var(--rule);text-align:left}
+.cmp-col:last-of-type,.cmp-delta{border-right:none}
+.cmp-col b,.cmp-delta b{display:block;font-family:"IBM Plex Mono",monospace;font-size:27px;font-weight:500;
+  letter-spacing:-.04em;margin-top:5px}
+.cmp-col.on{background:var(--paper-2)}
+.cmp-col.on .lab{color:var(--ink)}
+.cmp-col.win b{color:var(--up)}
+.cmp-delta b.u{color:var(--up)} .cmp-delta b.d{color:var(--dn)}
+.cmp-sub{display:block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);margin-top:5px}
+.wk{border-bottom:1px solid var(--rule);padding:11px 0}
+.wk-h{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.wk-gw{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;letter-spacing:.06em;min-width:46px}
+.wk-pts{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-2)}
+.wk-hit{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--dn)}
+.wk-form,.wk-bank{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3)}
+.wk-h .btn{margin-left:auto}
+.wk-none{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);padding:7px 0 1px 60px}
+.mv{display:flex;align-items:center;gap:10px;padding:8px 0 2px 60px;font-size:13.5px;flex-wrap:wrap}
+.mv .arrow{color:var(--ink-3);font-family:"IBM Plex Mono",monospace}
+.mv-cost{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3)}
+.btn.tiny{padding:3px 8px;font-size:9.5px}
+.alt-why{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);
+  margin-left:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34%}
+.num.u{color:var(--up)} .num.d{color:var(--dn)}
+
+/* ── verdict tags ── */
+.tag.cat-buy{background:var(--up);color:#fff}
+.tag.cat-hold{border:1px solid var(--rule-2);color:var(--ink-3)}
+.tag.cat-monitor{background:var(--doubt);color:#fff}
+.tag.cat-sell{background:var(--dn);color:#fff}
+
+/* ── algorithm transparency ── */
+.factors{display:flex;flex-direction:column;gap:8px}
+.fac{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:12px;align-items:center;font-size:12.5px}
+.fac-k{color:var(--ink-2)}
+.fac-t{height:7px;background:var(--paper-3);position:relative}
+.fac-t i{position:absolute;inset:0 auto 0 0;background:var(--ink-3)}
+.fac-t i.good{background:var(--up)} .fac-t i.bad{background:var(--dn)}
+.fac-v{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);text-align:right;white-space:nowrap}
+.concern{margin:14px 0 0;font-size:13px;color:var(--dn)}
+.swing{font-family:"IBM Plex Mono",monospace;font-size:11px}
+.swing.u{color:var(--up)} .swing.d{color:var(--dn)}
+.strong{font-weight:600}
+.why2{font-family:"IBM Plex Mono",monospace;font-size:11px;margin-bottom:6px;display:block}
+
+@media (max-width:820px){
+  .health{grid-template-columns:1fr;gap:20px}
+  .hs-row{grid-template-columns:104px minmax(0,1fr) 30px;gap:9px}
+  .ans{grid-template-columns:1fr;gap:5px}
+  .ans-q{padding-top:0}
+  .whybtn{justify-self:start}
+  .why{grid-column:1/-1}
+  .cmp-col,.cmp-delta{padding-right:16px;margin-right:16px}
+  .mv,.wk-none{padding-left:0}
+}
 </style>
 </head>
 <body>
@@ -433,13 +566,18 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
 <nav>
   <div class="navin">
     <span class="mark">FPL&nbsp;DESK</span>
+    <a href="#thisweek">This week</a>
     <a href="#squad">Squad</a>
     <a href="#planner">Planner</a>
-    <a href="#picks">Picks</a>
-    <a href="#prices">Prices</a>
-    <a href="#targets">Targets</a>
-    <a href="#fixtures">Fixtures</a>
-    <a href="#news">News</a>
+    <a href="#changed">Changed</a>
+    <a href="#picks" class="analyst-only">Picks</a>
+    <a href="#prices" class="analyst-only">Prices</a>
+    <a href="#targets" class="analyst-only">Targets</a>
+    <a href="#fixtures" class="analyst-only">Fixtures</a>
+    <div class="modeSeg" id="modeSeg" role="group" aria-label="View mode">
+      <button data-mode="decision" aria-pressed="true">Decision</button>
+      <button data-mode="analyst" aria-pressed="false">Analyst</button>
+    </div>
     <button class="themeBtn" id="themeBtn">Invert</button>
   </div>
 </nav>
@@ -461,10 +599,48 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
 <div class="shell">
   <div class="run" id="run"></div>
 
+  <section id="thisweek" hidden>
+    <div class="head">
+      <h2>This week</h2>
+      <div class="meta"><label class="ck">free transfers<input type="number" id="ftIn" min="0" max="5" value="1" style="width:44px;min-width:0"></label></div>
+    </div>
+    <div class="headline" id="headline"></div>
+    <div class="health" id="health" hidden></div>
+    <div class="answers" id="answers"></div>
+  </section>
+
   <section id="squad">
     <div class="head"><h2>Squad</h2><div class="meta" id="squadNote"></div></div>
     <div id="squadCard"><div class="loading">Loading&hellip;</div></div>
     <div class="key" id="fdrKey" hidden></div>
+  </section>
+
+  <section id="planner" hidden>
+    <div class="head">
+      <h2>Planner</h2>
+      <div class="meta">
+        <button class="btn" id="planCopy">Copy to other plan</button>
+        <button class="btn" id="planReset">Reset</button>
+      </div>
+    </div>
+    <div id="planCompare"></div>
+    <div id="planProblems"></div>
+    <div id="planWeeks"></div>
+    <details>
+      <summary>How plans are scored</summary>
+      <div class="body">
+        Each plan is walked gameweek by gameweek: transfers are applied, the bank and accumulated hits are tracked,
+        and the best legal eleven is fielded every week. The total is the sum of those weeks minus the hits, so two
+        plans are directly comparable over the same horizon.
+        Existing players are valued at today's market price, since FPL's real sell price needs a logged-in endpoint —
+        so a plan within £0.2m of your budget is worth checking on the real site.
+      </div>
+    </details>
+  </section>
+
+  <section id="changed" hidden>
+    <div class="head"><h2>What changed</h2><div class="meta" id="changedNote"></div></div>
+    <div class="chgwrap" id="changedBody"></div>
   </section>
 
   <section id="leagueSec" hidden>
@@ -472,33 +648,12 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
     <div class="lgs" id="leagues"></div>
   </section>
 
-  <section id="alertSec" hidden>
-    <div class="head"><h2>Attention</h2><div class="meta" id="alertNote"></div></div>
-    <div class="alerts" id="alerts"></div>
-  </section>
-
-  <section id="planner" hidden>
-    <div class="head"><h2>Planner</h2><div class="meta">Test transfers against the real budget</div></div>
-    <div class="plrun" id="plHead"></div>
-    <div id="plWarn"></div>
-    <ul class="plist" id="plList"></ul>
-    <details>
-      <summary>How the budget is worked out</summary>
-      <div class="body">
-        FPL sells a player back at your purchase price plus half of any rise since, rounded down. Purchase prices
-        need a logged-in endpoint, so this values your existing players at today's market price. Exact for anyone
-        held since the start; up to a tenth or two optimistic for someone who has risen. Within £0.2m of your
-        budget, check it on the real site before committing.
-      </div>
-    </details>
-  </section>
-
-  <section id="picks" hidden>
+  <section id="picks" class="analyst-only" hidden>
     <div class="head"><h2>Worth a look</h2><div class="meta">Shortlists from the numbers</div></div>
     <div id="shelves"></div>
   </section>
 
-  <section id="prices" hidden>
+  <section id="prices" class="analyst-only" hidden>
     <div class="head"><h2>Price watch</h2><div class="meta" id="priceNote"></div></div>
     <div class="filters">
       <div class="seg" id="priceSeg" role="group" aria-label="Direction">
@@ -518,6 +673,7 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
           <th class="s hide-sm" data-k="seasonDelta">Season</th>
           <th class="s" data-k="ratio">Progress</th>
           <th class="l s hide-xs" data-k="ratio2">Status</th>
+          <th class="l hide-sm">Impact on you</th>
           <th class="s hide-xs" data-k="owned">Owned</th>
           <th class="s hide-sm" data-k="ownDelta">Own &Delta;</th>
           <th class="s hide-sm" data-k="net">Net transfers</th>
@@ -530,13 +686,13 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
       <div class="body">
         FPL does not publish the thresholds that trigger a price change, so progress is an estimate: net transfers
         this gameweek measured against how many managers own the player, scaled so 100% is roughly where a change
-        becomes likely. Past 100% a move is due, often that night. Ownership change is this gameweek's net
-        transfers as a share of all managers, in percentage points.
+        becomes likely. Past 100% a move is due, often that night. Ownership change is this gameweek's net transfers
+        as a share of all managers, in percentage points.
       </div>
     </details>
   </section>
 
-  <section id="targets" hidden>
+  <section id="targets" class="analyst-only" hidden>
     <div class="head"><h2>Targets</h2><div class="meta" id="targetNote"></div></div>
     <div class="filters">
       <div class="seg" id="posSeg" role="group" aria-label="Position">
@@ -547,7 +703,7 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
         <button data-pos="FWD" aria-pressed="false">FWD</button>
       </div>
       <input type="search" id="search" placeholder="Player or club" aria-label="Search players">
-      <label class="ck">max £<input type="number" id="maxPrice" min="3.8" max="16" step="0.1" value="16" style="width:56px;min-width:0"></label>
+      <label class="ck">max &pound;<input type="number" id="maxPrice" min="3.8" max="16" step="0.1" value="16" style="width:56px;min-width:0"></label>
       <label class="ck"><input type="checkbox" id="hideFlag" checked> hide flagged</label>
       <label class="ck"><input type="checkbox" id="hideOwned"> hide mine</label>
     </div>
@@ -555,22 +711,29 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
       <table>
         <thead><tr>
           <th class="l s" data-k="name">Player</th>
-          <th class="s" data-k="price">£</th>
-          <th class="s" data-k="score" aria-sort="descending">Desk</th>
-          <th class="s hide-xs" data-k="form">Form</th>
-          <th class="s hide-sm" data-k="epNext">xPts</th>
-          <th class="s hide-sm" data-k="xGI90">xGI/90</th>
-          <th class="s hide-xs" data-k="minsPct">Mins</th>
-          <th class="s" data-k="fdr5">FDR</th>
+          <th class="s" data-k="price">&pound;</th>
+          <th class="s" data-k="overall" aria-sort="descending">Overall</th>
+          <th class="s hide-xxs" data-k="short">Short</th>
+          <th class="s" data-k="long">Long</th>
+          <th class="s hide-sm" data-k="value">Value</th>
+          <th class="s hide-sm" data-k="differential">Diff</th>
+          <th class="s hide-xs" data-k="captain">Captain</th>
           <th class="s hide-sm" data-k="owned">Own</th>
         </tr></thead>
         <tbody id="targetRows"></tbody>
       </table>
     </div>
-    <details><summary>How the Desk score works</summary><div class="body" id="howText"></div></details>
+    <details><summary>What the six scores mean</summary><div class="body">
+      All but Value are expected points per gameweek, which is what lets a keeper and a striker sit in one ranking.
+      <b>Overall</b> averages the next five gameweeks. <b>Short</b> weights the very next match hardest.
+      <b>Long</b> looks across the whole horizon and deliberately ignores form, leaning on the season rate and the
+      underlying numbers instead, so a player in a rough patch with a good run coming still reads well.
+      <b>Value</b> is points per &pound;10m. <b>Differential</b> is what you gain on the average manager once his
+      effective ownership is accounted for. <b>Captain</b> is the doubled return from the next gameweek alone.
+    </div></details>
   </section>
 
-  <section id="fixtures" hidden>
+  <section id="fixtures" class="analyst-only" hidden>
     <div class="head"><h2>Fixtures</h2><div class="meta" id="tickerNote"></div></div>
     <div class="tw"><table>
       <thead><tr id="tickHead"></tr></thead>
@@ -578,7 +741,7 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
     </table></div>
   </section>
 
-  <section id="news" hidden>
+  <section id="news" class="analyst-only" hidden>
     <div class="head"><h2>Injuries &amp; bans</h2><div class="meta">From the official FPL feed</div></div>
     <div class="clubs" id="clubs"></div>
   </section>
@@ -599,902 +762,6 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
 </aside>
 <div class="tip" id="tip"></div>
 
-<script>
-(function(){
-"use strict";
-
-var POS_ORDER = ["GKP","DEF","MID","FWD"];
-var SQUAD_SHAPE = { GKP:2, DEF:5, MID:5, FWD:3 };
-var MAX_PER_CLUB = 3;
-var RISE_THRESHOLD = 0.075; // net transfers / owners at which a change becomes likely
-
-var $  = function(s){ return document.querySelector(s); };
-var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
-var esc = function(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
-  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); };
-
-var S = null, D = {}, TEAM = {}, BYID = {}, MYIDS = {}, GWS = [], MAXPROJ = 1;
-
-/* Club kits, drawn as plain jerseys. No club marks are used. */
-var KIT = {
-  1:{b:"#EF0107",s:"#FFFFFF"},        2:{b:"#670E36",s:"#95BFE5"},
-  3:{b:"#DA291C",s:"#000000",st:1},   4:{b:"#E30613",s:"#FFFFFF",st:1},
-  5:{b:"#0057B8",s:"#FFFFFF",st:1},   6:{b:"#034694",s:"#034694"},
-  7:{b:"#7ACBF0",s:"#FFFFFF"},        8:{b:"#1B458F",s:"#C4122E",st:1},
-  9:{b:"#003399",s:"#003399"},        10:{b:"#FFFFFF",s:"#000000"},
-  11:{b:"#F5A12D",s:"#000000",st:1},  12:{b:"#0044A9",s:"#FFFFFF"},
-  13:{b:"#FFFFFF",s:"#1D428A"},       14:{b:"#C8102E",s:"#C8102E"},
-  15:{b:"#6CABDD",s:"#FFFFFF"},       16:{b:"#DA291C",s:"#DA291C"},
-  17:{b:"#241F20",s:"#FFFFFF",st:1},  18:{b:"#DD0000",s:"#DD0000"},
-  19:{b:"#FFFFFF",s:"#132257"},       20:{b:"#EB172B",s:"#FFFFFF",st:1}
-};
-var kitSeq = 0;
-function kit(teamId, w){
-  var k = KIT[teamId] || { b:"#8892a6", s:"#ffffff" };
-  var h = Math.round(w * 1.05), id = "k" + (++kitSeq), stripes = "";
-  if (k.st) for (var i = 0; i < 4; i++)
-    stripes += '<rect x="' + (10 + i * 5) + '" y="4" width="2.6" height="38" fill="' + k.s + '"/>';
-  return '<svg class="kit" width="' + w + '" height="' + h + '" viewBox="0 0 40 42" aria-hidden="true">' +
-    '<defs><clipPath id="' + id + '"><path d="M10 8 L10 40 Q20 42 30 40 L30 8 Z"/></clipPath></defs>' +
-    '<path d="M14 3 L5 7 L1.5 17 L8.5 20 L10 16 L10 40 Q20 42 30 40 L30 16 L31.5 20 L38.5 17 L35 7 L26 3 Q20 8.5 14 3 Z" ' +
-      'fill="' + k.b + '" stroke="rgba(0,0,0,.3)" stroke-width="1"/>' +
-    '<g clip-path="url(#' + id + ')">' + stripes + "</g>" +
-    '<path d="M14 3 L5 7 L1.5 17 L8.5 20 L10 16" fill="' + k.s + '" stroke="rgba(0,0,0,.3)" stroke-width="1"/>' +
-    '<path d="M26 3 L35 7 L38.5 17 L31.5 20 L30 16" fill="' + k.s + '" stroke="rgba(0,0,0,.3)" stroke-width="1"/>' +
-    '<path d="M14 3 Q20 8.5 26 3" fill="none" stroke="rgba(0,0,0,.32)" stroke-width="1.2"/></svg>';
-}
-
-/* ── prefs ─────────────────────────────────────────────────────── */
-function loadPrefs(){ try { return JSON.parse(localStorage.getItem("fpldesk.prefs") || "{}"); } catch(e){ return {}; } }
-function savePrefs(){ try { localStorage.setItem("fpldesk.prefs", JSON.stringify(prefs)); } catch(e){} }
-var prefs = Object.assign({
-  pos:"ALL", sort:"score", dir:-1, maxPrice:16, hideFlag:true, hideOwned:false, q:"",
-  theme:null, freeTransfers:1,
-  pDir:"all", pQ:"", pMine:false, pOwned:true, pSort:"ratio", pDirn:-1
-}, loadPrefs());
-
-function applyTheme(){
-  if (prefs.theme) document.documentElement.setAttribute("data-theme", prefs.theme);
-  else document.documentElement.removeAttribute("data-theme");
-}
-applyTheme();
-$("#themeBtn").addEventListener("click", function(){
-  var dark = document.documentElement.getAttribute("data-theme") === "dark" ||
-    (!prefs.theme && matchMedia("(prefers-color-scheme: dark)").matches);
-  prefs.theme = dark ? "light" : "dark";
-  applyTheme(); savePrefs();
-});
-
-/* ── helpers ───────────────────────────────────────────────────── */
-var FDR_WORD = { 1:"very easy", 2:"easy", 3:"even", 4:"tough", 5:"very tough" };
-function fdrClass(d){ return "f" + Math.min(5, Math.max(1, Math.round(d))); }
-function fxChip(f){
-  var t = TEAM[f.opp] || {}, o = t.short || "?";
-  return '<span class="fx ' + fdrClass(f.d) + '" title="' + esc((t.name || "?") +
-    (f.home ? " (home)" : " (away)") + " · difficulty " + f.d + ", " + (FDR_WORD[f.d] || "")) + '">' +
-    (f.home ? o : o.toLowerCase()) + "<small>" + f.d + "</small></span>";
-}
-function statusTag(p){
-  if (p.status === "a") return "";
-  if (p.status === "s") return '<span class="tag susp">ban</span>';
-  if (p.status === "d") return '<span class="tag doubt">' + (p.chance != null ? p.chance + "%" : "doubt") + "</span>";
-  return '<span class="tag out">out</span>';
-}
-function minsPct(p){
-  var played = Math.max(1, (S.currentEvent ? S.currentEvent.id : 1));
-  return Math.min(1, p.mins / (90 * played));
-}
-function nextFixtures(teamId, n){ return (S.fixtures[teamId] || []).slice(0, n); }
-function compact(n){
-  if (n == null) return "";
-  var a = Math.abs(n);
-  if (a >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "m";
-  if (a >= 1e4) return Math.round(n / 1e3) + "k";
-  return n.toLocaleString();
-}
-function signed(n, dp){ return (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n).toFixed(dp == null ? 1 : dp); }
-function ordinal(n){
-  if (n == null) return "—";
-  var s = ["th","st","nd","rd"], v = n % 100;
-  return n.toLocaleString() + (s[(v - 20) % 10] || s[v] || s[0]);
-}
-
-var tipEl = $("#tip");
-function showTip(html, x, y){
-  tipEl.innerHTML = html; tipEl.classList.add("on");
-  var r = tipEl.getBoundingClientRect();
-  tipEl.style.left = Math.max(6, Math.min(window.innerWidth - r.width - 6, x - r.width / 2)) + "px";
-  tipEl.style.top = Math.max(6, y - r.height - 9) + "px";
-}
-function hideTip(){ tipEl.classList.remove("on"); }
-
-/* ── Desk score ────────────────────────────────────────────────── */
-function computeScores(players){
-  var gwPlayed = S.currentEvent ? S.currentEvent.id : 1;
-  var lean = Math.min(1, Math.max(0, (gwPlayed - 1) / 7));
-  var wEp = 0.70 - 0.40 * lean, wPpg = 0.15 + 0.25 * lean, wForm = 0.15 + 0.15 * lean;
-
-  players.forEach(function(p){
-    var fixMult = Math.min(1.35, Math.max(0.55, (5.5 - p.fdr5) / 2.5));
-    p.minsPct = minsPct(p);
-    p.score = Math.round((wEp * p.epNext + wPpg * p.ppg + wForm * p.form) * fixMult * (0.25 + 0.75 * p.minsPct) * 100) / 100;
-    p.ppm = p.price > 0 ? Math.round((p.pts / p.price) * 10) / 10 : 0;
-    // price-watch derivations, all from figures already in the snapshot
-    p.net = (p.tIn || 0) - (p.tOut || 0);
-    p.ratio = p.price_ ? p.price_.ratio : 0;
-    p.progress = Math.round(p.ratio / RISE_THRESHOLD * 100);
-    p.seasonDelta = Math.round((p.price - p.priceStart) * 10) / 10;
-    p.ownDelta = S.totalManagers ? (p.net / S.totalManagers) * 100 : 0;
-  });
-  MAXPROJ = players.reduce(function(m, p){ return Math.max(m, p.score); }, 1) || 1;
-
-  $("#howText").innerHTML =
-    "An estimate of <b>points per gameweek</b>, which is what lets a keeper and a striker sit in one ranking. " +
-    "It blends three figures already measured per game &mdash; the FPL model's own expected points, the player's " +
-    "season average, and recent form &mdash; then adjusts for the next five fixtures and for minutes, so someone " +
-    "producing in 25 minutes off the bench is marked down against someone who starts. With <b>" + gwPlayed +
-    " gameweek" + (gwPlayed === 1 ? "" : "s") + "</b> played the weighting is " + Math.round(wEp * 100) +
-    "% expected points, " + Math.round(wPpg * 100) + "% season average, " + Math.round(wForm * 100) + "% form. " +
-    "Early on it leans on the model, because two good games is not evidence. It knows nothing about press " +
-    "conferences, rotation or penalty duties.";
-}
-
-/* ── masthead ──────────────────────────────────────────────────── */
-function renderHeader(){
-  var ne = S.nextEvent;
-  if (ne){
-    var d = new Date(ne.deadline);
-    $("#eyebrow").textContent = "Next deadline · " + ne.name;
-    $("#deadline").textContent = d.toLocaleString(undefined, { weekday:"long", day:"numeric", month:"long" });
-    $("#deadlineSub").textContent =
-      d.toLocaleTimeString(undefined, { hour:"numeric", minute:"2-digit" }) + " your time  /  " +
-      d.toLocaleString("en-GB", { timeZone:"UTC", hour:"2-digit", minute:"2-digit" }) + " UTC";
-    var t = d.getTime(); tick(t); setInterval(function(){ tick(t); }, 30000);
-  } else {
-    $("#eyebrow").textContent = "Season";
-    $("#deadline").textContent = "No upcoming deadline";
-    $("#cd").textContent = "—";
-  }
-
-  var flagged = S.players.filter(function(p){ return p.status !== "a" && p.owned >= 1; }).length;
-  var rising  = S.players.filter(function(p){ return p.progress >= 100; }).length;
-  var falling = S.players.filter(function(p){ return p.progress <= -100; }).length;
-
-  var cells = [];
-  if (S.currentEvent) cells.push(["Gameweek", S.currentEvent.name.replace("Gameweek ", "") +
-    " <small>" + (S.currentEvent.finished ? "final" : "live") + "</small>"]);
-  if (S.entry && !S.entry.error){
-    cells.push(["Overall rank", compact(S.entry.overallRank)]);
-    cells.push(["Points", S.entry.overallPoints + " <small>" + S.entry.gwPoints + " this GW</small>"]);
-    cells.push(["Bank", "£" + S.entry.bank.toFixed(1) + " <small>squad £" + S.entry.squadValue.toFixed(1) + "</small>"]);
-  }
-  cells.push(["Flagged", flagged + " <small>1%+ owned</small>"]);
-  cells.push(["Changes due", rising + " up <small>" + falling + " down</small>"]);
-
-  $("#run").innerHTML = cells.map(function(c){
-    return '<div><span class="lab">' + esc(c[0]) + "</span><b>" + c[1] + "</b></div>";
-  }).join("");
-}
-function tick(target){
-  var el = $("#cd"), diff = target - Date.now();
-  if (diff <= 0){ el.textContent = "closed"; return; }
-  var d = Math.floor(diff / 864e5), h = Math.floor(diff % 864e5 / 36e5), m = Math.floor(diff % 36e5 / 6e4);
-  el.textContent = d > 0 ? d + "d " + h + "h" : h + "h " + m + "m";
-}
-
-/* ── squad ─────────────────────────────────────────────────────── */
-function manCard(p, pick){
-  var pins = "";
-  if (pick && pick.captain) pins += '<span class="pin c">C</span>';
-  else if (pick && pick.vice) pins += '<span class="pin v">V</span>';
-  if (p.status !== "a") pins += '<span class="pin ' + (p.status === "s" ? "susp" : p.status === "d" ? "doubt" : "out") + '">!</span>';
-  else if (p.progress >= 55) pins += '<span class="pin up">&#9650;</span>';
-  else if (p.progress <= -55) pins += '<span class="pin dn">&#9660;</span>';
-
-  var nf = nextFixtures(p.team, 3), chips = "";
-  for (var i = 0; i < 3; i++)
-    chips += nf[i] ? fxChip(nf[i]) : '<span class="fx f3" title="Blank gameweek">&ndash;</span>';
-
-  var mult = pick && pick.multiplier > 1 ? pick.multiplier : 1;
-  return '<button class="man" data-pid="' + p.id + '" title="' + esc(p.full) + " · " + p.pts + ' points this season">' +
-    (pins ? '<span class="pins">' + pins + "</span>" : "") + kit(p.team, 46) +
-    '<span class="nm">' + esc(p.name) + "</span>" +
-    '<span class="sc">' + (p.gwPts || 0) * mult + (mult > 1 ? "<small>×" + mult + "</small>" : "<small>pts</small>") + "</span>" +
-    '<span class="fixrow">' + chips + "</span></button>";
-}
-
-function renderSquad(){
-  var e = S.entry;
-  if (!e || e.error || !e.picks || !e.picks.length){
-    $("#squadNote").textContent = "Not connected";
-    $("#fdrKey").hidden = true;
-    $("#squadCard").innerHTML =
-      '<div class="setup"><h3>Add your team ID and this fills in</h3>' +
-      "<p>The rest of the page works without it. With it you get the pitch, the planner, your leagues, " +
-      "and your own players marked through the tables.</p><ol>" +
-      "<li><div>Log in at <code>fantasy.premierleague.com</code>, click <b>Points</b>, and copy the number from the address bar: <code>/entry/<b>1234567</b>/event/2</code></div></li>" +
-      "<li><div>Open <code>config.json</code> in your repo and click the pencil.</div></li>" +
-      '<li><div>Set <code>"teamId": 1234567</code> and commit. The page catches up in a couple of minutes.</div></li>' +
-      "</ol></div>";
-    return;
-  }
-
-  MYIDS = {}; e.picks.forEach(function(p){ MYIDS[p.id] = p; });
-  var starters = e.picks.filter(function(p){ return p.slot <= 11; });
-  var bench = e.picks.filter(function(p){ return p.slot > 11; }).sort(function(a,b){ return a.slot - b.slot; });
-
-  var lines = { GKP:[], DEF:[], MID:[], FWD:[] };
-  starters.forEach(function(pk){ var p = BYID[pk.id]; if (p) lines[p.pos].push({ p:p, pk:pk }); });
-
-  var shape = [lines.DEF.length, lines.MID.length, lines.FWD.length].join("-");
-  var chips = e.chipsUsed && e.chipsUsed.length
-    ? e.chipsUsed.map(function(c){ return c.name + " GW" + c.gw; }).join(", ") : "none used";
-  var gwName = S.currentEvent ? "GW" + S.currentEvent.id : "GW";
-  $("#squadNote").textContent = e.name + "  ·  " + shape + "  ·  " + gwName + " points  ·  " +
-    e.transfersMade + " transfer" + (e.transfersMade === 1 ? "" : "s") +
-    (e.transferCost ? " (−" + e.transferCost + ")" : "") + "  ·  chips: " + chips;
-
-  var html = '<div class="pitch"><span class="shape">' + shape + "</span>";
-  POS_ORDER.forEach(function(pos){
-    if (lines[pos].length)
-      html += '<div class="line">' + lines[pos].map(function(r){ return manCard(r.p, r.pk); }).join("") + "</div>";
-  });
-  html += '</div><div class="bench"><span class="lab">Bench</span><div class="line">' +
-    bench.map(function(pk){ var p = BYID[pk.id]; return p ? manCard(p, pk) : ""; }).join("") + "</div></div>";
-  $("#squadCard").innerHTML = html;
-
-  var key = $("#fdrKey"); key.hidden = false;
-  key.innerHTML = "<span>Fixture difficulty</span>" +
-    [1,2,3,4,5].map(function(d){
-      return '<span class="fx f' + d + '" title="' + d + " — " + FDR_WORD[d] + '">' + d + "</span>";
-    }).join("") +
-    "<span>easiest to hardest · UPPER CASE is home</span>";
-}
-
-/* ── leagues ───────────────────────────────────────────────────── */
-function movement(rank, last){
-  if (rank == null || last == null || last === 0) return '<span class="delta n">–</span>';
-  var d = last - rank;
-  if (d > 0) return '<span class="delta u">&#9650; ' + compact(d) + "</span>";
-  if (d < 0) return '<span class="delta d">&#9660; ' + compact(Math.abs(d)) + "</span>";
-  return '<span class="delta n">–</span>';
-}
-function renderLeagues(){
-  var e = S.entry;
-  var list = (e && !e.error && e.leagues) ? e.leagues : [];
-  if (!list.length){ $("#leagueSec").hidden = true; return; }
-  $("#leagueSec").hidden = false;
-
-  var priv = list.filter(function(l){ return l.type === "private"; });
-  var ordered = priv.concat(list.filter(function(l){ return l.type !== "private"; }));
-  $("#leagueNote").textContent = priv.length
-    ? priv.length + " mini-league" + (priv.length === 1 ? "" : "s") + " · select for the table"
-    : "global only";
-
-  $("#leagues").innerHTML = ordered.map(function(l, i){
-    var big = l.myRank != null && l.myRank >= 1e5;
-    var rank = l.myRank == null ? "—" : big ? compact(l.myRank) : ordinal(l.myRank);
-    return '<button class="lgrow" data-league="' + i + '">' +
-      '<span class="pos' + (rank.length > 6 ? " sm" : "") + '">' + rank + "</span>" +
-      '<span class="mid"><span class="lgname">' + esc(l.name) + "</span>" +
-        '<span class="of">' + (l.type === "private" ? "mini-league" : "global") +
-        (l.size ? " · " + compact(l.size) + " managers" : "") + "</span></span>" +
-      movement(l.myRank, l.myLastRank) + "</button>";
-  }).join("");
-
-  $$("#leagues [data-league]").forEach(function(b){
-    b.addEventListener("click", function(){ openLeague(ordered[parseInt(b.dataset.league, 10)]); });
-  });
-}
-function openLeague(l){
-  if (!l) return;
-  var body;
-  if (!l.standings || !l.standings.length){
-    body = '<div class="blk"><p class="note">' + (l.type === "private"
-      ? "No table yet. Standings appear once a gameweek has been scored."
-      : "Global leagues run to millions of managers, so only your position is tracked. You are " +
-        ordinal(l.myRank) + (l.size ? " of " + l.size.toLocaleString() : "") + ".") + "</p></div>";
-  } else {
-    var meShown = l.standings.some(function(r){ return r.isMe; });
-    body = '<div class="blk"><span class="lab">Top ' + l.standings.length + "</span>" +
-      '<table class="st"><thead><tr><th class="l">#</th><th class="l">Team</th><th>GW</th><th>Total</th></tr></thead><tbody>' +
-      l.standings.map(function(r){
-        return '<tr class="' + (r.isMe ? "me" : "") + '"><td class="l rk">' + r.rank + "</td>" +
-          '<td class="l"><span>' + esc(r.team) + '</span><span class="mg">' + esc(r.manager) + "</span></td>" +
-          '<td class="num">' + r.gw + '</td><td class="num">' + r.total.toLocaleString() + "</td></tr>";
-      }).join("") + "</tbody></table>" +
-      (!meShown && l.myRank ? '<p class="note" style="margin-top:14px">You are ' + ordinal(l.myRank) +
-        ", outside the top " + l.standings.length + " shown.</p>" : "") + "</div>";
-  }
-  openDrawer({ title:l.name, meta:(l.type === "private" ? "Mini-league" : "Global") + " · you are " +
-    ordinal(l.myRank) + (l.size ? " of " + compact(l.size) : ""), body:body });
-}
-
-/* ── alerts ────────────────────────────────────────────────────── */
-function renderAlerts(){
-  var out = [], e = S.entry;
-  if (e && !e.error && e.picks){
-    e.picks.forEach(function(pk){
-      var p = BYID[pk.id]; if (!p) return;
-      if (p.status !== "a"){
-        out.push([(p.status === "d" && (p.chance == null || p.chance >= 50)) ? "warn" : "crit",
-          esc(p.name) + " is " + (p.status === "s" ? "suspended" : p.status === "d" ? "a doubt" : "unavailable"),
-          p.news ? esc(p.news) : "No detail in the FPL feed."]);
-      } else if (p.progress <= -100){
-        out.push(["warn", esc(p.name) + " is due a price drop",
-          compact(Math.abs(p.net)) + " net transfers out. Selling first protects your team value."]);
-      }
-    });
-  }
-  S.players.filter(function(p){ return p.progress >= 100 && p.owned >= 4 && !MYIDS[p.id]; })
-    .sort(function(a,b){ return b.ratio - a.ratio; }).slice(0, 3)
-    .forEach(function(p){
-      out.push(["good", esc(p.name) + " is due a price rise",
-        compact(p.net) + " net transfers in, " + p.owned.toFixed(1) + "% owned."]);
-    });
-
-  if (!out.length){ $("#alertSec").hidden = true; return; }
-  var sev = { crit:0, warn:1, good:2 };
-  out.sort(function(a,b){ return sev[a[0]] - sev[b[0]]; });
-  $("#alertSec").hidden = false;
-  $("#alertNote").textContent = out.length + " item" + (out.length === 1 ? "" : "s");
-  $("#alerts").innerHTML = out.slice(0, 10).map(function(a){
-    return '<div class="al sev-' + a[0] + '"><i></i><div><b>' + a[1] + "</b> <span>" + a[2] + "</span></div></div>";
-  }).join("");
-}
-
-/* ── planner ───────────────────────────────────────────────────── */
-var plan = null;
-function initPlanner(){
-  var e = S.entry;
-  if (!e || e.error || !e.picks || !e.picks.length){ $("#planner").hidden = true; return; }
-  $("#planner").hidden = false;
-  var saved = null;
-  try { saved = JSON.parse(localStorage.getItem("fpldesk.plan") || "null"); } catch(err){}
-  var original = e.picks.slice().sort(function(a,b){ return a.slot - b.slot; }).map(function(p){ return p.id; });
-  plan = (saved && saved.original && saved.original.join() === original.join() && saved.current)
-    ? { original:original, current:saved.current.slice() }
-    : { original:original, current:original.slice() };
-  renderPlanner();
-}
-function savePlan(){ try { localStorage.setItem("fpldesk.plan", JSON.stringify(plan)); } catch(e){} }
-
-function planStats(){
-  var e = S.entry, spend = 0, changes = 0;
-  plan.original.forEach(function(oid, i){
-    var nid = plan.current[i];
-    if (nid !== oid){ changes++; var o = BYID[oid], n = BYID[nid]; if (o && n) spend += n.price - o.price; }
-  });
-  var remaining = Math.round((e.bank - spend) * 10) / 10;
-  var ft = Math.max(0, parseInt(prefs.freeTransfers, 10) || 0);
-  var hits = Math.max(0, changes - ft) * 4;
-
-  var before = 0, after = 0;
-  plan.original.forEach(function(id){ var p = BYID[id]; if (p) before += p.score; });
-  plan.current.forEach(function(id){ var p = BYID[id]; if (p) after += p.score; });
-
-  var counts = { GKP:0, DEF:0, MID:0, FWD:0 }, clubs = {}, seen = {}, dupes = [];
-  plan.current.forEach(function(id){
-    var p = BYID[id]; if (!p) return;
-    counts[p.pos]++; clubs[p.team] = (clubs[p.team] || 0) + 1;
-    if (seen[id]) dupes.push(p.name);
-    seen[id] = 1;
-  });
-  var problems = [];
-  POS_ORDER.forEach(function(pos){
-    if (counts[pos] !== SQUAD_SHAPE[pos]) problems.push(counts[pos] + " " + pos + ", not " + SQUAD_SHAPE[pos]);
-  });
-  Object.keys(clubs).forEach(function(t){
-    if (clubs[t] > MAX_PER_CLUB) problems.push("Too many from " + ((TEAM[t] || {}).name || "one club") +
-      " (" + clubs[t] + ", max " + MAX_PER_CLUB + ")");
-  });
-  if (dupes.length) problems.push("Duplicate: " + dupes.join(", "));
-  if (remaining < 0) problems.push("Over budget by £" + Math.abs(remaining).toFixed(1) + "m");
-
-  return { remaining:remaining, changes:changes, hits:hits,
-           delta:Math.round((after - before) * 100) / 100, problems:problems };
-}
-
-function renderPlanner(){
-  var st = planStats();
-  var net = Math.round((st.delta * 5 - st.hits) * 10) / 10;
-  $("#plHead").innerHTML =
-    '<div><span class="lab">In the bank</span><b class="' + (st.remaining < 0 ? "d" : st.remaining > 0 ? "u" : "") +
-      '">£' + st.remaining.toFixed(1) + "</b></div>" +
-    '<div><span class="lab">Transfers</span><b>' + st.changes + "</b></div>" +
-    '<div><span class="lab">Hit</span><b class="' + (st.hits ? "d" : "") + '">' +
-      (st.hits ? "−" + st.hits : "0") + "</b></div>" +
-    '<div><span class="lab">Desk change</span><b class="' + (st.delta > 0 ? "u" : st.delta < 0 ? "d" : "") + '">' +
-      signed(st.delta, 2) + "</b></div>" +
-    '<div><span class="lab">Net over 5 GW</span><b class="' + (net > 0 ? "u" : net < 0 ? "d" : "") + '">' +
-      signed(net, 1) + "</b></div>" +
-    '<div class="right"><label class="ck">free transfers<input type="number" id="ftIn" min="0" max="5" value="' +
-      (prefs.freeTransfers || 0) + '" style="width:44px;min-width:0"></label>' +
-      '<button class="btn" id="plReset"' + (st.changes ? "" : " disabled") + ">Reset</button></div>";
-
-  $("#plWarn").innerHTML = st.problems.map(function(t){
-    return '<div class="plwarn"><span>' + esc(t) + "</span></div>";
-  }).join("");
-
-  var byPos = { GKP:[], DEF:[], MID:[], FWD:[] };
-  plan.current.forEach(function(id, i){ var p = BYID[id]; if (p) byPos[p.pos].push({ p:p, i:i }); });
-
-  var html = "";
-  POS_ORDER.forEach(function(pos){
-    if (!byPos[pos].length) return;
-    html += '<li class="grp"><span class="lab">' + pos + "</span></li>";
-    byPos[pos].forEach(function(row){
-      var p = row.p, oid = plan.original[row.i], changed = oid !== p.id, o = BYID[oid];
-      html += '<li class="' + (changed ? "swapped" : "") + '">' +
-        '<span class="badge">' + esc((TEAM[p.team] || {}).short || "") + "</span>" +
-        '<span class="who" data-pid="' + p.id + '">' + esc(p.name) + "</span>" + statusTag(p) +
-        (changed && o ? '<span class="was">' + esc(o.name) + "</span>" : "") +
-        '<span class="rt"><span class="fxs">' + nextFixtures(p.team, 3).map(fxChip).join("") + "</span>" +
-          '<span class="num" style="width:44px;text-align:right">£' + p.price.toFixed(1) + "</span>" +
-          '<span class="num dimtxt" style="width:34px;text-align:right">' + p.score.toFixed(1) + "</span>" +
-          '<button class="btn" data-swap="' + row.i + '">Swap</button></span></li>';
-    });
-  });
-  $("#plList").innerHTML = html;
-
-  $("#ftIn").addEventListener("change", function(){
-    prefs.freeTransfers = Math.max(0, Math.min(5, parseInt(this.value, 10) || 0));
-    savePrefs(); renderPlanner();
-  });
-  var rb = $("#plReset");
-  if (rb) rb.addEventListener("click", function(){ plan.current = plan.original.slice(); savePlan(); renderPlanner(); });
-  $$("#plList [data-swap]").forEach(function(b){
-    b.addEventListener("click", function(){ openSwap(parseInt(b.dataset.swap, 10)); });
-  });
-}
-
-function openSwap(idx){
-  var cur = BYID[plan.current[idx]]; if (!cur) return;
-  var ceiling = Math.round((planStats().remaining + cur.price) * 10) / 10;
-  var inSquad = {}, clubCount = {};
-  plan.current.forEach(function(id, i){
-    if (i === idx) return;
-    inSquad[id] = 1;
-    var q = BYID[id];
-    if (q) clubCount[q.team] = (clubCount[q.team] || 0) + 1;
-  });
-  var options = S.players.filter(function(p){
-    return p.pos === cur.pos && !inSquad[p.id] && p.price <= ceiling + 0.001;
-  }).sort(function(a,b){ return b.score - a.score; }).slice(0, 60);
-
-  // flag anyone who would breach the three-per-club limit before it is chosen,
-  // rather than letting the squad go illegal and reporting it afterwards
-  var blocked = options.filter(function(p){ return (clubCount[p.team] || 0) >= MAX_PER_CLUB; }).length;
-
-  openDrawer({
-    title: "Replace " + cur.name,
-    meta: (TEAM[cur.team] || {}).name + " · " + cur.pos + " · up to £" + ceiling.toFixed(1) + "m",
-    body: '<div class="blk"><span class="lab">' + options.length + " within budget" +
-      (blocked ? " · " + blocked + " at the club limit" : "") + "</span><ul class=\"plist\">" +
-      (options.length ? options.map(function(p){
-        var full = (clubCount[p.team] || 0) >= MAX_PER_CLUB;
-        return '<li class="' + (full ? "atlimit" : "") + '"><span class="badge">' +
-          esc((TEAM[p.team] || {}).short || "") + "</span>" +
-          '<span class="who">' + esc(p.name) + "</span>" + statusTag(p) +
-          (full ? '<span class="tag mine">3 already</span>' : "") +
-          '<span class="rt"><span class="fxs">' + nextFixtures(p.team, 3).map(fxChip).join("") + "</span>" +
-          '<span class="num" style="width:40px;text-align:right">£' + p.price.toFixed(1) + "</span>" +
-          '<button class="btn' + (full ? "" : " go") + '" data-buy="' + p.id + '"' +
-            (full ? ' title="You already have three from this club"' : "") + ">In</button></span></li>";
-      }).join("") : '<li><span class="note">Nothing in this position fits. Free up money elsewhere first.</span></li>') +
-      "</ul></div>"
-  });
-  $$("#dBody [data-buy]").forEach(function(b){
-    b.addEventListener("click", function(){
-      plan.current[idx] = parseInt(b.dataset.buy, 10);
-      savePlan(); renderPlanner(); closeDrawer();
-    });
-  });
-}
-
-/* ── shelves ───────────────────────────────────────────────────── */
-function renderShelves(){
-  var pool = S.players.filter(function(p){ return p.status === "a" && p.minsPct > 0.35; });
-  var mine = function(p){ return !MYIDS[p.id]; };
-  // sorting purely on fixtures fills a shelf with one club's back four
-  function spread(list, perTeam, limit){
-    var seen = {}, out = [];
-    for (var i = 0; i < list.length && out.length < limit; i++){
-      var t = list[i].team;
-      if ((seen[t] || 0) >= perTeam) continue;
-      seen[t] = (seen[t] || 0) + 1; out.push(list[i]);
-    }
-    return out;
-  }
-  var shelves = [
-    { t:"In form", d:"Scoring now, not yet widely owned.",
-      rows:spread(pool.filter(function(p){ return p.form >= 3 && p.owned < 20 && mine(p); })
-        .sort(function(a,b){ return b.form - a.form; }), 2, 12),
-      why:function(p){ return "form " + p.form.toFixed(1); } },
-    { t:"Best value", d:"Most Desk score per million.",
-      rows:spread(pool.filter(mine).sort(function(a,b){ return (b.score / b.price) - (a.score / a.price); }), 2, 12),
-      why:function(p){ return (p.score / p.price).toFixed(2) + " per £m"; } },
-    { t:"Kind fixtures", d:"Easiest five-gameweek run, at most two per club.",
-      rows:spread(pool.filter(function(p){ return p.fdr5 <= 2.9 && p.score > 0 && mine(p); })
-        .sort(function(a,b){ return (a.fdr5 - b.fdr5) || (b.score - a.score); }), 2, 12),
-      why:function(p){ return "FDR " + p.fdr5.toFixed(1); } },
-    { t:"Differentials", d:"Under 5% owned, numbers that hold up.",
-      rows:spread(pool.filter(function(p){ return p.owned < 5 && p.score > 0 && mine(p); })
-        .sort(function(a,b){ return b.score - a.score; }), 2, 12),
-      why:function(p){ return p.owned.toFixed(1) + "% owned"; } },
-    { t:"Enablers", d:"Cheap, and they start.",
-      rows:spread(pool.filter(function(p){ return p.price <= 5 && p.minsPct >= 0.7 && mine(p); })
-        .sort(function(a,b){ return b.score - a.score; }), 2, 12),
-      why:function(p){ return Math.round(p.minsPct * 100) + "% of minutes"; } }
-  ].filter(function(s){ return s.rows.length >= 3; });
-
-  if (!shelves.length){ $("#picks").hidden = true; return; }
-  $("#picks").hidden = false;
-  $("#shelves").innerHTML = shelves.map(function(s){
-    return '<div class="shelf"><h3>' + esc(s.t) + "</h3><p>" + esc(s.d) + '</p><div class="rail">' +
-      s.rows.map(function(p){
-        return '<button class="stub" data-pid="' + p.id + '">' +
-          '<span class="top">' + kit(p.team, 20) + '<span class="nm">' + esc(p.name) + "</span></span>" +
-          '<span class="why">' + esc(s.why(p)) + "</span>" +
-          '<span class="fig"><span>£<b>' + p.price.toFixed(1) + "</b></span>" +
-            "<span>own <b>" + p.owned.toFixed(1) + "</b></span>" +
-            "<span>desk <b>" + p.score.toFixed(1) + "</b></span></span></button>";
-      }).join("") + "</div></div>";
-  }).join("");
-}
-
-/* ── price watch ───────────────────────────────────────────────── */
-function priceState(p){
-  if (p.progress >= 100) return ["u", "rise due"];
-  if (p.progress >= 55)  return ["u", "rising"];
-  if (p.progress <= -100) return ["d", "fall due"];
-  if (p.progress <= -55)  return ["d", "falling"];
-  return ["n", "steady"];
-}
-function renderPrices(){
-  var q = prefs.pQ.trim().toLowerCase();
-  var rows = S.players.filter(function(p){
-    if (prefs.pOwned && p.owned < 0.5) return false;
-    if (prefs.pMine && !MYIDS[p.id]) return false;
-    if (prefs.pDir === "up" && p.progress < 55) return false;
-    if (prefs.pDir === "down" && p.progress > -55) return false;
-    if (prefs.pDir === "all" && Math.abs(p.progress) < 5 && p.seasonDelta === 0) return false;
-    if (q){
-      var t = TEAM[p.team] || {};
-      if ((p.full + " " + p.name + " " + (t.name || "") + " " + (t.short || "")).toLowerCase().indexOf(q) === -1) return false;
-    }
-    return true;
-  });
-
-  rows.sort(function(a,b){
-    var k = prefs.pSort === "ratio2" ? "ratio" : prefs.pSort;
-    if (k === "name") return prefs.pDirn * String(a.name).localeCompare(String(b.name));
-    if (k === "ratio") return prefs.pDirn * (Math.abs(a.ratio) - Math.abs(b.ratio));
-    return prefs.pDirn * ((a[k] || 0) - (b[k] || 0));
-  });
-
-  var CAP = 150;
-  var up = rows.filter(function(p){ return p.progress >= 100; }).length;
-  var dn = rows.filter(function(p){ return p.progress <= -100; }).length;
-  $("#priceNote").textContent = rows.length.toLocaleString() + " player" + (rows.length === 1 ? "" : "s") +
-    " moving · " + up + " due up, " + dn + " due down" + (rows.length > CAP ? " · top " + CAP + " shown" : "");
-
-  $("#priceRows").innerHTML = rows.slice(0, CAP).map(function(p){
-    var t = TEAM[p.team] || {}, st = priceState(p);
-    // half the track spans 150% of the threshold, so past-due players stay distinguishable
-    var w = Math.min(50, Math.abs(p.progress) / 200 * 50);
-    var bar = '<span class="mk l"></span><span class="mk r"></span>' + (p.progress === 0 ? "" :
-      '<i class="' + (p.progress > 0 ? "u" : "d") + '" style="width:' + w.toFixed(1) + '%"></i>');
-    return "<tr>" +
-      '<td class="l"><span class="who" data-pid="' + p.id + '">' + esc(p.name) + "</span>" + statusTag(p) +
-        (MYIDS[p.id] ? '<span class="tag mine">mine</span>' : "") +
-        '<span class="sub">' + esc(t.short || "") + " · " + p.pos + "</span></td>" +
-      '<td class="num">£' + p.price.toFixed(1) + "</td>" +
-      '<td class="num hide-sm ' + (p.seasonDelta > 0 ? "" : "") + '">' +
-        (p.seasonDelta === 0 ? '<span class="dimtxt">–</span>' :
-          '<span class="pc ' + (p.seasonDelta > 0 ? "u" : "d") + '" style="width:auto">' + signed(p.seasonDelta) + "</span>") + "</td>" +
-      '<td><span class="prog"><span class="track">' + bar + '</span><span class="pc ' + st[0] + '">' +
-        (p.progress > 0 ? "+" : p.progress < 0 ? "−" : "") + Math.abs(p.progress) + "%</span></span></td>" +
-      '<td class="l hide-xs"><span class="state ' + st[0] + '"><b>' + st[1] + "</b></span></td>" +
-      '<td class="num hide-xs">' + p.owned.toFixed(1) + "%</td>" +
-      '<td class="num hide-sm ' + (p.ownDelta > 0 ? "" : "") + '"><span class="pc ' +
-        (p.ownDelta > 0.005 ? "u" : p.ownDelta < -0.005 ? "d" : "n") + '" style="width:auto">' +
-        (Math.abs(p.ownDelta) < 0.005 ? "–" : signed(p.ownDelta, 2)) + "</span></td>" +
-      '<td class="num hide-sm ' + (p.net > 0 ? "" : "") + '"><span class="pc ' +
-        (p.net > 0 ? "u" : p.net < 0 ? "d" : "n") + '" style="width:auto">' +
-        (p.net === 0 ? "–" : (p.net > 0 ? "+" : "−") + compact(Math.abs(p.net))) + "</span></td>" +
-    "</tr>";
-  }).join("") || '<tr><td colspan="8" class="dimtxt" style="padding:30px 0;text-align:left">Nothing matches those filters.</td></tr>';
-}
-
-/* ── targets ───────────────────────────────────────────────────── */
-function renderTargets(){
-  var q = prefs.q.trim().toLowerCase();
-  var rows = S.players.filter(function(p){
-    if (p.pts === 0 && p.mins === 0 && p.epNext === 0) return false;
-    if (prefs.pos !== "ALL" && p.pos !== prefs.pos) return false;
-    if (p.price > prefs.maxPrice) return false;
-    if (prefs.hideFlag && p.status !== "a") return false;
-    if (prefs.hideOwned && MYIDS[p.id]) return false;
-    if (q){
-      var t = TEAM[p.team] || {};
-      if ((p.full + " " + p.name + " " + (t.name || "") + " " + (t.short || "")).toLowerCase().indexOf(q) === -1) return false;
-    }
-    return true;
-  });
-  rows.sort(function(a,b){
-    var k = prefs.sort;
-    if (k === "name") return prefs.dir * String(a[k]).localeCompare(String(b[k]));
-    return prefs.dir * ((a[k] || 0) - (b[k] || 0));
-  });
-
-  var CAP = 120;
-  $("#targetNote").textContent = rows.length > CAP ? "top " + CAP + " of " + rows.length
-    : rows.length + " player" + (rows.length === 1 ? "" : "s");
-
-  $("#targetRows").innerHTML = rows.slice(0, CAP).map(function(p){
-    var t = TEAM[p.team] || {};
-    return "<tr>" +
-      '<td class="l"><span class="who" data-pid="' + p.id + '">' + esc(p.name) + "</span>" + statusTag(p) +
-        (MYIDS[p.id] ? '<span class="tag mine">mine</span>' : "") +
-        '<span class="sub">' + esc(t.short || "") + " · " + p.pos + "</span></td>" +
-      '<td class="num">' + p.price.toFixed(1) + "</td>" +
-      '<td class="num" style="font-weight:600">' + p.score.toFixed(1) + "</td>" +
-      '<td class="num hide-xs">' + p.form.toFixed(1) + "</td>" +
-      '<td class="num hide-sm">' + p.epNext.toFixed(1) + "</td>" +
-      '<td class="num hide-sm">' + p.xGI90.toFixed(2) + "</td>" +
-      '<td class="num hide-xs">' + Math.round(p.minsPct * 100) + "%</td>" +
-      '<td><span class="fx ' + fdrClass(p.fdr5) + '">' + p.fdr5.toFixed(1) + "</span></td>" +
-      '<td class="num hide-sm">' + p.owned.toFixed(1) + "</td></tr>";
-  }).join("") || '<tr><td colspan="9" class="dimtxt" style="padding:30px 0;text-align:left">No players match.</td></tr>';
-}
-
-/* ── ticker ────────────────────────────────────────────────────── */
-function renderTicker(){
-  GWS = [];
-  for (var g = S.horizonFrom; g < S.horizonFrom + Math.min(5, S.horizon); g++) GWS.push(g);
-  $("#tickerNote").textContent = "GW " + GWS[0] + "–" + GWS[GWS.length - 1] + " · lower total is easier";
-  $("#tickHead").innerHTML = '<th class="l">Club</th>' +
-    GWS.map(function(g){ return "<th>" + g + "</th>"; }).join("") + "<th>Total</th>";
-
-  var rows = S.teams.map(function(t){
-    var list = S.fixtures[t.id] || [], cells = [], sum = 0;
-    GWS.forEach(function(g){
-      var games = list.filter(function(f){ return f.gw === g; });
-      if (!games.length){ cells.push(null); sum += 3; }
-      else { cells.push(games); games.forEach(function(f){ sum += f.d; }); }
-    });
-    return { t:t, cells:cells, sum:sum };
-  }).sort(function(a,b){ return a.sum - b.sum || a.t.name.localeCompare(b.t.name); });
-
-  $("#ticker").innerHTML = rows.map(function(r){
-    return '<tr><td class="l"><span class="badge">' + esc(r.t.short) + "</span> " + esc(r.t.name) + "</td>" +
-      r.cells.map(function(c){
-        return '<td style="text-align:center">' +
-          (c ? c.map(fxChip).join(" ") : '<span class="fx f3">&ndash;</span>') + "</td>";
-      }).join("") + '<td class="num" style="font-weight:600">' + r.sum + "</td></tr>";
-  }).join("");
-  $("#fixtures").hidden = false;
-}
-
-/* ── injuries ──────────────────────────────────────────────────── */
-function renderInjuries(){
-  var byTeam = {};
-  S.players.filter(function(p){ return p.status !== "a"; })
-    .forEach(function(p){ (byTeam[p.team] = byTeam[p.team] || []).push(p); });
-  var keys = Object.keys(byTeam);
-  if (!keys.length){ $("#news").hidden = true; return; }
-  $("#news").hidden = false;
-  var rank = { u:0, i:1, s:2, d:3, n:4 };
-  $("#clubs").innerHTML = keys.sort(function(a,b){ return byTeam[b].length - byTeam[a].length; }).map(function(tid){
-    var t = TEAM[tid] || {};
-    var items = byTeam[tid].sort(function(a,b){
-      return ((rank[a.status] == null ? 9 : rank[a.status]) - (rank[b.status] == null ? 9 : rank[b.status])) || b.owned - a.owned;
-    });
-    return '<div class="club"><h4><span class="badge">' + esc(t.short || "") + "</span>" + esc(t.name || "") +
-      '<span class="n">' + items.length + "</span></h4><ul>" +
-      items.map(function(p){
-        return '<li><span class="nm" data-pid="' + p.id + '">' + esc(p.name) + "</span>" + statusTag(p) +
-          (p.owned >= 3 ? '<span class="sub">' + p.owned.toFixed(1) + "%</span>" : "") +
-          '<span class="ds">' + esc(p.news || "No detail given") + "</span></li>";
-      }).join("") + "</ul></div>";
-  }).join("");
-}
-
-/* ── charts ────────────────────────────────────────────────────── */
-function barChart(data, opts){
-  opts = opts || {};
-  var w = opts.width || 400, h = opts.height || 92, pad = 18, gap = 3, maxBar = opts.maxBar || 40;
-  if (!data.length) return "";
-  var max = Math.max.apply(null, data.map(function(d){ return d.value; })) || 1;
-  if (max <= 0) max = 1;
-  var bw = Math.min(maxBar, (w - (data.length - 1) * gap) / data.length);
-  var span = data.length * bw + (data.length - 1) * gap, x0 = (w - span) / 2;
-  var plot = h - pad - (opts.values ? 14 : 6);
-  var bars = data.map(function(d, i){
-    var bh = Math.max(2, (d.value / max) * plot), x = x0 + i * (bw + gap), y = h - pad - bh;
-    return '<rect class="cbar" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
-      '" height="' + bh.toFixed(1) + '" data-t="' + esc(d.label + " · " + d.value + (opts.unit || "")) + '"></rect>' +
-      (opts.labels ? '<text class="lbl" x="' + (x + bw / 2).toFixed(1) + '" y="' + (h - 5) +
-        '" text-anchor="middle">' + esc(d.short || d.label) + "</text>" : "") +
-      (opts.values ? '<text class="val" x="' + (x + bw / 2).toFixed(1) + '" y="' + (y - 4).toFixed(1) +
-        '" text-anchor="middle">' + d.value + "</text>" : "");
-  }).join("");
-  return '<svg class="chart" viewBox="0 0 ' + w + " " + h + '" role="img" style="max-height:' + h + 'px">' +
-    '<line class="axis" x1="' + Math.max(0, x0 - 6) + '" y1="' + (h - pad) + '" x2="' +
-    Math.min(w, x0 + span + 6) + '" y2="' + (h - pad) + '"/>' + bars + "</svg>";
-}
-
-/* ── drawer ────────────────────────────────────────────────────── */
-var lastFocus = null;
-function openDrawer(o){
-  lastFocus = document.activeElement;
-  $("#dName").textContent = o.title;
-  $("#dMeta").textContent = o.meta || "";
-  $("#dBody").innerHTML = o.body;
-  $("#scrim").classList.add("on"); $("#drawer").classList.add("on"); $("#drawer").focus();
-  $$("#dBody .cbar").forEach(function(b){
-    b.addEventListener("mouseenter", function(){
-      var r = b.getBoundingClientRect(); showTip(esc(b.dataset.t), r.left + r.width / 2, r.top);
-    });
-    b.addEventListener("mouseleave", hideTip);
-  });
-}
-function closeDrawer(){
-  $("#scrim").classList.remove("on"); $("#drawer").classList.remove("on"); hideTip();
-  if (lastFocus && lastFocus.focus) lastFocus.focus();
-}
-
-function openPlayer(pid){
-  var p = BYID[pid]; if (!p) return;
-  var t = TEAM[p.team] || {}, det = D[pid], st = priceState(p), b = "";
-
-  if (p.news) b += '<div class="newsbox">' + esc(p.news) + "</div>";
-
-  b += '<div class="blk"><span class="lab">This season</span><div class="kv">' +
-    '<div><div class="k">Price</div><div class="v">£' + p.price.toFixed(1) + "</div></div>" +
-    '<div><div class="k">Points</div><div class="v">' + p.pts + "</div></div>" +
-    '<div><div class="k">Per game</div><div class="v">' + p.ppg.toFixed(1) + "</div></div>" +
-    '<div><div class="k">Owned</div><div class="v">' + p.owned.toFixed(1) + "%</div></div>" +
-    '<div><div class="k">Minutes</div><div class="v">' + p.mins + "</div></div>" +
-    '<div><div class="k">Desk</div><div class="v">' + p.score.toFixed(1) + "</div></div></div></div>";
-
-  b += '<div class="blk"><span class="lab">Underlying</span><div class="kv">' +
-    '<div><div class="k">xG</div><div class="v">' + p.xG.toFixed(2) + "</div></div>" +
-    '<div><div class="k">xA</div><div class="v">' + p.xA.toFixed(2) + "</div></div>" +
-    '<div><div class="k">xGI / 90</div><div class="v">' + p.xGI90.toFixed(2) + "</div></div>" +
-    '<div><div class="k">Goals</div><div class="v">' + p.goals + "</div></div>" +
-    '<div><div class="k">Assists</div><div class="v">' + p.assists + "</div></div>" +
-    '<div><div class="k">Bonus</div><div class="v">' + p.bonus + "</div></div></div></div>";
-
-  b += '<div class="blk"><span class="lab">Price</span><div class="kv">' +
-    '<div><div class="k">Started</div><div class="v">£' + p.priceStart.toFixed(1) + "</div></div>" +
-    '<div><div class="k">Season</div><div class="v">' + (p.seasonDelta === 0 ? "–" : signed(p.seasonDelta)) + "</div></div>" +
-    '<div><div class="k">Progress</div><div class="v" style="color:var(--' +
-      (st[0] === "u" ? "up" : st[0] === "d" ? "dn" : "ink-3") + ')">' +
-      (p.progress > 0 ? "+" : p.progress < 0 ? "−" : "") + Math.abs(p.progress) + "%</div></div>" +
-    '<div><div class="k">Net transfers</div><div class="v">' +
-      (p.net === 0 ? "–" : (p.net > 0 ? "+" : "−") + compact(Math.abs(p.net))) + "</div></div>" +
-    '<div><div class="k">Own change</div><div class="v">' +
-      (Math.abs(p.ownDelta) < 0.005 ? "–" : signed(p.ownDelta, 2)) + "</div></div>" +
-    '<div><div class="k">Status</div><div class="v" style="font-size:12px">' + st[1] + "</div></div></div></div>";
-
-  if (det && det.gws && det.gws.length){
-    b += '<div class="blk"><span class="lab">Points by gameweek</span>' +
-      barChart(det.gws.map(function(g){ return { label:"GW" + g.gw, short:String(g.gw), value:g.pts }; }),
-        { width:400, height:92, labels:true, unit:" pts" }) + "</div>";
-  }
-
-  if (det && det.past && det.past.length){
-    var seasons = det.past.slice(-6);
-    b += '<div class="blk"><span class="lab">Previous seasons</span>' +
-      barChart(seasons.map(function(s){
-        return { label:s.season, short:s.season.slice(0,2) + "/" + s.season.slice(-2), value:s.pts };
-      }), { width:400, height:104, labels:true, values:true, unit:" pts" }) +
-      '<table class="seasons">' + seasons.slice().reverse().map(function(s){
-        return "<tr><td>" + esc(s.season) + "</td><td>" + s.mins + " mins · " + s.goals + "g " + s.assists +
-          "a · ended £" + s.endCost.toFixed(1) + "</td><td>" + s.pts + "</td></tr>";
-      }).join("") + "</table></div>";
-  } else {
-    b += '<div class="blk"><span class="lab">Previous seasons</span><p class="note">' +
-      (det ? "No Premier League seasons on record — new to the league."
-           : "History is pulled for your squad plus the 180 most-owned players; this one is outside that set.") +
-      "</p></div>";
-  }
-
-  var nf = nextFixtures(p.team, 5);
-  b += '<div class="blk"><span class="lab">Next ' + nf.length + ' fixtures</span><div class="fxlist">' +
-    (nf.length ? nf.map(fxChip).join("") : '<span class="note">None scheduled.</span>') + "</div></div>";
-
-  openDrawer({ title:p.full || p.name,
-    meta:(t.name || "") + " · " + p.pos + " · £" + p.price.toFixed(1) + "m" +
-      (MYIDS[p.id] ? " · in your squad" : ""), body:b });
-}
-
-document.addEventListener("click", function(ev){
-  var el = ev.target.closest("[data-pid]");
-  if (el && !el.hasAttribute("data-buy")) openPlayer(parseInt(el.dataset.pid, 10));
-});
-$("#dClose").addEventListener("click", closeDrawer);
-$("#scrim").addEventListener("click", closeDrawer);
-document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDrawer(); });
-
-/* ── wiring ────────────────────────────────────────────────────── */
-function segment(sel, key, onChange){
-  $$(sel + " button").forEach(function(b){
-    var v = b.dataset.pos || b.dataset.dir;
-    b.setAttribute("aria-pressed", String(v === prefs[key]));
-    b.addEventListener("click", function(){
-      prefs[key] = v;
-      $$(sel + " button").forEach(function(x){ x.setAttribute("aria-pressed", String(x === b)); });
-      savePrefs(); onChange();
-    });
-  });
-}
-function bindSort(scope, sortKey, dirKey, onChange){
-  $$(scope + " thead th.s").forEach(function(th){
-    if (prefs[sortKey] === th.dataset.k) th.setAttribute("aria-sort", prefs[dirKey] === 1 ? "ascending" : "descending");
-    th.addEventListener("click", function(){
-      var k = th.dataset.k;
-      if (prefs[sortKey] === k) prefs[dirKey] = -prefs[dirKey];
-      else { prefs[sortKey] = k; prefs[dirKey] = (k === "name") ? 1 : -1; }
-      $$(scope + " thead th.s").forEach(function(x){ x.removeAttribute("aria-sort"); });
-      th.setAttribute("aria-sort", prefs[dirKey] === 1 ? "ascending" : "descending");
-      savePrefs(); onChange();
-    });
-  });
-}
-function wire(){
-  segment("#posSeg", "pos", renderTargets);
-  segment("#priceSeg", "pDir", renderPrices);
-  bindSort("#targets", "sort", "dir", renderTargets);
-  bindSort("#prices", "pSort", "pDirn", renderPrices);
-
-  var s = $("#search"); s.value = prefs.q;
-  s.addEventListener("input", function(){ prefs.q = s.value; savePrefs(); renderTargets(); });
-  var ps = $("#priceSearch"); ps.value = prefs.pQ;
-  ps.addEventListener("input", function(){ prefs.pQ = ps.value; savePrefs(); renderPrices(); });
-  var mp = $("#maxPrice"); mp.value = prefs.maxPrice;
-  mp.addEventListener("input", function(){
-    var v = parseFloat(mp.value); prefs.maxPrice = Number.isFinite(v) ? v : 16; savePrefs(); renderTargets();
-  });
-  [["#hideFlag","hideFlag",renderTargets],["#hideOwned","hideOwned",renderTargets],
-   ["#priceMine","pMine",renderPrices],["#priceOwned","pOwned",renderPrices]].forEach(function(x){
-    var el = $(x[0]); el.checked = !!prefs[x[1]];
-    el.addEventListener("change", function(){ prefs[x[1]] = el.checked; savePrefs(); x[2](); });
-  });
-}
-
-/* ── boot ──────────────────────────────────────────────────────── */
-var bust = "?v=" + Date.now();
-Promise.all([
-  fetch("data/snapshot.json" + bust).then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }),
-  fetch("data/details.json" + bust).then(function(r){ return r.ok ? r.json() : {}; }).catch(function(){ return {}; })
-]).then(function(res){
-  S = res[0]; D = res[1] || {};
-  S.teams.forEach(function(t){ TEAM[t.id] = t; });
-  S.players.forEach(function(p){ BYID[p.id] = p; });
-  if (S.entry && S.entry.picks) S.entry.picks.forEach(function(p){ MYIDS[p.id] = p; });
-
-  computeScores(S.players);
-  renderHeader(); renderSquad(); renderLeagues(); renderAlerts();
-  initPlanner(); renderShelves(); renderInjuries(); renderTicker();
-  $("#prices").hidden = false; $("#targets").hidden = false;
-  wire(); renderPrices(); renderTargets();
-
-  var mins = Math.round((Date.now() - new Date(S.generatedAt).getTime()) / 60000);
-  $("#stamp").textContent = "updated " + (mins < 60 ? mins + " min ago" : Math.round(mins / 60) + "h ago");
-}).catch(function(err){
-  $("#deadline").textContent = "No data yet";
-  $("#deadlineSub").textContent = "The refresh job has not produced a snapshot.";
-  $("#squadCard").innerHTML = '<div class="setup"><h3>Waiting on the first refresh</h3>' +
-    "<p>The page loaded, but <code>data/snapshot.json</code> is not there yet. On a new repo that is normal.</p><ol>" +
-    "<li><div>Open the <b>Actions</b> tab in your repo.</div></li>" +
-    "<li><div>Pick <b>Refresh FPL data</b>, then <b>Run workflow</b>.</div></li>" +
-    "<li><div>Give it a minute, then reload.</div></li></ol>" +
-    '<p class="note" style="margin-top:16px">' + esc(err.message) + "</p></div>";
-});
-})();
-</script>
+<script type="module" src="js/ui.js"></script>
 </body>
 </html>
