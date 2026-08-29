@@ -247,6 +247,10 @@ async function main() {
           provisional: !!f.finished_provisional,
           minutes: f.minutes || 0,
           hScore: f.team_h_score, aScore: f.team_a_score,
+          // Difficulty for the round in progress. The per-team fixture map
+          // only covers the horizon AHEAD, so without these the schedule
+          // panel has no ratings for the week actually being played.
+          dh: f.team_h_difficulty, da: f.team_a_difficulty,
         }))
         .sort((x, y) => new Date(x.kickoff) - new Date(y.kickoff))
     : [];
