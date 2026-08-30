@@ -7,7 +7,7 @@ import {
   evaluatePlan, captainRanking, captainRankImpact, rankShift, fixtureSwings,
   weeklyAdvice, ownershipOpportunity, templateSquad, templateDiff,
   simulatePlayer, availability, underlyingRate, longAvailability,
-  gameweekState, playerTraits, CHIPS, selectEntry,
+  gameweekState, playerTraits, CHIPS, selectEntry, priceChanges,
   rng, poisson, normalCdf, normalInv, percentile, clamp,
 } from '../js/engine.js';
 
@@ -864,4 +864,154 @@ test('results band by what you can act on', () => {
     'bands never interleave');
   assert.ok(bands.includes(0) && bands.includes(2),
     'the search spans both what you can buy and what the rules forbid');
+});
+
+/* ─────────────────── the three-per-club rule ─────────────────── */
+
+/**
+ * A squad holding exactly `n` players from one club, all defenders, padded out
+ * with midfielders from elsewhere. Spreading the club across positions is what
+ * lets a FOURTH club-mate exist as a midfielder — the fixture only has three
+ * players per club per position, so a same-position fourth cannot be built.
+ */
+function squadWith(club, n) {
+  const clubDef = ctx.players.filter((p) => p.team === club && p.pos === 'DEF');
+  const clubMid = ctx.players.filter((p) => p.team === club && p.pos === 'MID');
+  const away = ctx.players.filter((p) => p.team !== club && p.pos === 'MID');
+  return {
+    ids: [...clubDef.slice(0, n).map((p) => p.id), ...away.slice(0, 15 - n).map((p) => p.id)],
+    clubDef, clubMid, away,
+  };
+}
+
+test('a THIRD player from a club is allowed — the limit is three, not two', () => {
+  const { ids, clubMid, away } = squadWith(7, 2);
+  const rows = replacementOptions(away[0], ctx, 60, ids, { query: '' });
+  const third = rows.find((r) => r.player.id === clubMid[0].id);
+  assert.ok(third, 'the third club-mate is offered');
+  assert.equal(third.blocked, null, 'and is not blocked');
+  assert.equal(third.legal, true);
+});
+
+test('a FOURTH is blocked, and the message states the real count', () => {
+  const { ids, clubMid, away } = squadWith(7, 3);
+  const rows = replacementOptions(away[0], ctx, 60, ids, { query: '' });
+  const fourth = rows.find((r) => r.player.id === clubMid[0].id);
+  assert.ok(fourth, 'a fourth candidate exists');
+  assert.equal(fourth.blocked, 'club');
+  assert.match(fourth.blockedText, /^3 from /, `states the true count: "${fourth.blockedText}"`);
+  assert.match(fourth.blockedWhy, /already has 3 from/, 'says how many it counted');
+  assert.match(fourth.blockedWhy, /\(.+,.+\)/, 'and names them, so the claim is checkable');
+});
+
+test('swapping one club-mate for another is legal even at the limit', () => {
+  // Selling one and buying another from the same club keeps you at three, so
+  // it must never be blocked.
+  const { ids, clubDef } = squadWith(7, 3);
+  const spare = ctx.players.find((p) => p.team === 7 && p.pos === 'DEF' && !ids.includes(p.id));
+  if (!spare) return;                       // fixture too small; nothing to assert
+  const rows = replacementOptions(clubDef[0], ctx, 60, ids, { query: '' });
+  const hit = rows.find((r) => r.player.id === spare.id);
+  assert.ok(hit);
+  assert.equal(hit.blocked, null, 'the outgoing player is discounted from his own club count');
+});
+
+test('a duplicated squad id cannot inflate a club count', () => {
+  // A malformed plan mapping two slots onto one player used to read as an
+  // extra club-mate, firing the limit a player early with nothing on screen
+  // to explain it.
+  const { ids, clubDef, clubMid, away } = squadWith(7, 2);
+  const dupe = [...ids, clubDef[0].id, clubDef[1].id];
+  const rows = replacementOptions(away[0], ctx, 60, dupe, { query: '' });
+  const third = rows.find((r) => r.player.id === clubMid[0].id);
+  assert.equal(third.blocked, null, 'duplicates are collapsed before counting');
+});
+
+test('the club count is taken from the squad it is given, not a rebuilt one', () => {
+  // The UI bug this guards: the picker used to rebuild the squad from the weeks
+  // BEFORE the one being edited, so a transfer staged in that week was invisible
+  // to it and the club you had just moved away from still counted — firing the
+  // limit one player early.
+  const { ids, clubDef, clubMid, away } = squadWith(7, 3);
+  const afterSelling = ids.filter((id) => id !== clubDef[0].id).concat(away[13].id);
+  const rows = replacementOptions(away[0], ctx, 60, afterSelling, { query: '' });
+  const nowLegal = rows.find((r) => r.player.id === clubMid[0].id);
+  assert.ok(nowLegal, 'a club-mate is still offered');
+  assert.equal(nowLegal.blocked, null,
+    'the squad handed in holds only two from that club, so a third is fine');
+});
+
+/* ─────────────────── confirmed price changes ─────────────────── */
+
+const priceLogFixture = () => ({
+  updated: '2026-08-30T00:40:00Z', days: 21,
+  changes: [
+    // a tight window — the 15-minute cron
+    { id: 9001, name: 'Alpha', club: 'ARS', pos: 'MID', from: 5.5, to: 5.6, delta: 0.1,
+      owned: 12.5, gw: 3, after: '2026-08-30T00:25:00Z', seen: '2026-08-30T00:40:00Z' },
+    // a wide one — the 3-hour baseline
+    { id: 9002, name: 'Beta', club: 'LIV', pos: 'DEF', from: 6.0, to: 5.9, delta: -0.1,
+      owned: 4.0, gw: 3, after: '2026-08-29T21:00:00Z', seen: '2026-08-30T00:00:00Z' },
+    // an earlier day
+    { id: 9003, name: 'Gamma', club: 'MCI', pos: 'FWD', from: 9.0, to: 9.1, delta: 0.1,
+      owned: 30.0, gw: 2, after: '2026-08-27T00:25:00Z', seen: '2026-08-27T00:40:00Z' },
+  ],
+});
+
+test('price changes group by the day they landed on in the target zone', () => {
+  const out = priceChanges(priceLogFixture(), ctx, { tz: 'Australia/Sydney' });
+  assert.equal(out.count, 3);
+  assert.equal(out.rises, 2);
+  assert.equal(out.falls, 1);
+  assert.ok(out.days.length >= 2, 'more than one day is represented');
+  const keys = out.days.map((d) => d.key);
+  assert.deepEqual(keys, keys.slice().sort().reverse(), 'newest day first');
+  for (const d of out.days) assert.equal(d.rows.length, d.rises + d.falls);
+});
+
+test('a change is a window, never an instant', () => {
+  const out = priceChanges(priceLogFixture(), ctx);
+  const tight = out.days.flatMap((d) => d.rows).find((c) => c.id === 9001);
+  const wide = out.days.flatMap((d) => d.rows).find((c) => c.id === 9002);
+  assert.equal(tight.spanMin, 15);
+  assert.equal(tight.exact, true, '15 minutes is tight enough to quote as a time');
+  assert.equal(wide.spanMin, 180);
+  assert.equal(wide.exact, false, 'three hours is a range, not a time');
+  // Every row keeps both ends, so nothing downstream can invent a precise
+  // moment FPL never published.
+  for (const c of out.days.flatMap((d) => d.rows)) {
+    assert.ok(c.after && c.seen, 'both ends of the window survive');
+    assert.ok(new Date(c.seen) > new Date(c.after));
+  }
+});
+
+test('the day carries its gameweek, so "when" answers week as well as time', () => {
+  const out = priceChanges(priceLogFixture(), ctx);
+  assert.ok(out.days.every((d) => Number.isFinite(d.gw)), 'every day names a gameweek');
+  const older = out.days[out.days.length - 1];
+  assert.equal(older.gw, 2, 'an older day keeps the gameweek it happened in');
+});
+
+test('your own players are flagged in the price log', () => {
+  const clean = priceChanges(priceLogFixture(), ctx);
+  assert.equal(clean.mine, 0, 'nobody in the base fixture is in the squad');
+  const log = priceLogFixture();
+  log.changes[0].id = ctx.squad[0].id;       // one of yours moved
+  const out = priceChanges(log, ctx);
+  assert.equal(out.mine, 1);
+  assert.ok(out.days.flatMap((d) => d.rows).find((c) => c.id === ctx.squad[0].id).yours);
+});
+
+test('the spread of window widths is reported, so the UI can caveat once', () => {
+  const out = priceChanges(priceLogFixture(), ctx);
+  assert.equal(out.tightest, 15);
+  assert.equal(out.widest, 180);
+});
+
+test('an empty or missing log is not an error', () => {
+  for (const log of [null, undefined, {}, { changes: [] }]) {
+    const out = priceChanges(log, ctx);
+    assert.equal(out.count, 0);
+    assert.deepEqual(out.days, []);
+  }
 });
