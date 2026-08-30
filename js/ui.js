@@ -11,7 +11,7 @@ import {
   ownershipOpportunity, templateDiff, simulatePlayer,
   gameweekState, playerTraits, CHIPS, matchSchedule, selectEntry,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB,
-} from './engine.js?v=10';
+} from './engine.js?v=11';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -595,7 +595,13 @@ function maybeCoach() {
   if (!seen && CTX.squad.length) openCoach(0);
 }
 
-/** Squad state at the start of a gameweek, after earlier weeks' moves. */
+/**
+ * Squad state at the START of a gameweek, before that week's own moves.
+ *
+ * Only a fallback now, for a gameweek the plan evaluator did not return.
+ * Anything checking the FPL rules must use the week's own `squad` from
+ * `evaluatePlan`, which is what the pitch renders — see openReplacements.
+ */
 function squadAtGw(plan, gw) {
   let squad = CTX.squad.map((s) => s.id);
   (plan.weeks || []).filter((w) => w.gw < gw).forEach((w) => {
@@ -607,15 +613,20 @@ function squadAtGw(plan, gw) {
 /** Ranked replacements with the reason each one beat the rest. */
 function openReplacements(outId, gw) {
   const plan = getPlans()[prefs.activePlan];
-  const squadIds = squadAtGw(plan, gw);
   const out = CTX.byId.get(outId);
-  const spent = squadIds.reduce((s, id) => {
-    const orig = CTX.squad.find((x) => x.id === id);
-    return s;
-  }, 0);
   const evalNow = evaluatePlan(plan, CTX, { freeTransfers: 1, startingFree: prefs.freeTransfers });
   const wk = evalNow.weeks.find((w) => w.gw === gw);
   const bank = wk ? wk.bank : (CTX.entry ? CTX.entry.bank : 0);
+
+  /* The squad the picker reasons about must be the squad on the pitch.
+   *
+   * It used to rebuild its own from `squadAtGw`, which applies only the weeks
+   * STRICTLY BEFORE this one — so the moment you staged a transfer in the week
+   * you were editing, the two disagreed by exactly that move. A club you had
+   * just moved away from still counted, and the three-per-club rule fired a
+   * player early with nothing on screen to explain it. `wk.squad` is what the
+   * pitch renders, so it is what the rules are checked against. */
+  const squadIds = wk ? wk.squad : squadAtGw(plan, gw);
   const ceiling = bank + out.price;
 
   /**
