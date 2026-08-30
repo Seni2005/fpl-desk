@@ -2,9 +2,14 @@ name: Refresh FPL data
 
 on:
   schedule:
-    # Every 3 hours. FPL prices change around 01:30 UTC, so the 02:00 run
-    # catches them within half an hour.
+    # Every 3 hours, as the baseline.
     - cron: "0 */3 * * *"
+    # The nightly price change. FPL moves prices around 01:30 UK time, which is
+    # 00:30 UTC under BST and 01:30 UTC under GMT — so this covers both, every
+    # fifteen minutes. The API never says WHEN a price changed, so the only
+    # timing we can honestly report is the window between two refreshes: this
+    # is what turns "sometime in the last three hours" into a usable time.
+    - cron: "*/15 0-2 * * *"
     # Weekend match windows, every 15 minutes. GitHub runs scheduled workflows
     # on a best-effort basis and often lags 5-15 minutes, so live points are
     # minutes old rather than seconds — the interface says which.
@@ -40,7 +45,7 @@ jobs:
         run: |
           git config user.name  "fpl-desk bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/snapshot.json data/details.json data/changes.json data/timeline.json
+          git add data/snapshot.json data/details.json data/changes.json data/timeline.json data/prices.json
           if git diff --staged --quiet; then
             echo "No change in snapshot — nothing to commit."
           else
