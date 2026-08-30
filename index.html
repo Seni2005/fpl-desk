@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FPL Desk</title>
 <meta name="description" content="Squad, prices, fixtures and transfer targets for Fantasy Premier League.">
-<meta name="build" content="11">
+<meta name="build" content="12">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0B0D0E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -630,10 +630,14 @@ footer{margin-top:64px;border-top:3px solid var(--ink);padding:16px 0 44px;
 .chg .lab i{font-style:normal;color:var(--ink-2)}
 .chg ul{list-style:none;margin:0;padding:0}
 .chg li{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid var(--rule);font-size:13px}
+/* the figure is the point of the row, so the NAME gives way when space runs
+   short — never the price it changed to */
+.chg li .who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chg li .chg-when{flex:0 0 auto}
 .chg li:last-child{border-bottom:none}
 .chg li.own{font-weight:600}
 .chg-v{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;white-space:nowrap;
-  max-width:54%;overflow:hidden;text-overflow:ellipsis;text-align:right}
+  flex:0 0 auto;text-align:right}
 .chg-v.u{color:var(--up)} .chg-v.d{color:var(--dn)}
 
 /* ── multi-week planner ── */
@@ -835,6 +839,56 @@ td.spk{padding:0 9px;width:74px}
 tr:hover .sp{fill:var(--ink)}
 tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
 .spk-none{font-family:"JetBrains Mono",monospace;color:var(--ink-3);font-size:11px}
+
+/* when a listed price move was actually detected — the same fact the
+   confirmed-changes panel carries, so a row here is dateable too */
+.chg-when{font-family:"JetBrains Mono",monospace;font-size:9.5px;color:var(--ink-3);
+  white-space:nowrap;margin-left:auto;cursor:help}
+.chg-when + .chg-v{margin-left:8px}
+
+/* ── confirmed price changes ───────────────────────────────────
+   A record, sitting deliberately above the prediction table. The
+   two must never read as one system: a guess borrowing the
+   authority of a fact is the failure mode here. */
+#pricelog{border:1px solid var(--rule);margin-bottom:22px;background:var(--paper-2)}
+.pl-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:9px 12px;
+  border-bottom:1px solid var(--rule)}
+.pl-note{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ink-3);
+  margin-left:auto;text-align:right}
+.pl-day{border-bottom:1px solid var(--rule)}
+.pl-day:last-child{border-bottom:none}
+.pl-daylab{display:flex;align-items:baseline;gap:12px;padding:5px 12px;background:var(--paper-3)}
+.pl-daylab .lab{color:var(--ink)}
+.pl-gw{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ink-3)}
+.pl-tally{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px}
+.pl-tally .u{color:var(--up)} .pl-tally .d{color:var(--dn)}
+.pl-row{display:grid;grid-template-columns:104px 38px minmax(90px,220px) 34px auto 1fr 120px 54px;
+  align-items:center;gap:10px;padding:0 12px;height:28px;
+  border-bottom:1px solid var(--rule);background:var(--paper);
+  border-left:3px solid transparent}
+.pl-row:last-child{border-bottom:none}
+.pl-row:hover{background:var(--paper-2)}
+.pl-row.mine{border-left-color:var(--ink)}
+/* a window we can quote to the minute reads as ink; a wide one stays grey,
+   so the difference between a time and a range is visible before it is read */
+.pl-when{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--ink-3);cursor:help;
+  white-space:nowrap;display:flex;align-items:baseline;gap:5px}
+.pl-when.exact{color:var(--ink-2)}
+.pl-when i{font-style:normal;font-size:9px;opacity:.7}
+.pl-pos{font-family:"JetBrains Mono",monospace;font-size:9.5px;color:var(--ink-3)}
+.pl-move{display:flex;align-items:baseline;gap:6px;justify-content:flex-end;
+  font-family:"JetBrains Mono",monospace;font-size:12px}
+.pl-move i{font-style:normal;font-size:9px}
+.pl-move.u i,.pl-move.u .strong{color:var(--up)}
+.pl-move.d i,.pl-move.d .strong{color:var(--dn)}
+.pl-move .num:first-child{color:var(--ink-3);text-decoration:line-through}
+.pl-own{font-size:10.5px;color:var(--ink-3);text-align:right}
+#plCaveat{padding:9px 12px 11px;margin:0;border-top:1px solid var(--rule);max-width:none}
+@media (max-width:760px){
+  .pl-row{grid-template-columns:92px 34px minmax(0,1fr) auto 108px;gap:8px;padding:0 9px}
+  .pl-pos,.pl-own{display:none}
+  .pl-note{margin-left:0;text-align:left;width:100%}
+}
 
 /* ── the match schedule ────────────────────────────────────────
    A fixture list is a timetable, so it is laid out like one: a fixed
@@ -1211,6 +1265,24 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
 
   <section id="prices" class="analyst-only" hidden>
     <div class="head"><h2>Price watch</h2><div class="meta" id="priceNote"></div></div>
+
+    <!-- What actually happened, kept separate from what is merely predicted.
+         The table below this is an estimate; these are a record. -->
+    <div id="pricelog" hidden>
+      <div class="pl-head">
+        <span class="lab">Confirmed changes</span>
+        <div class="seg" id="plSeg" role="group" aria-label="Filter confirmed changes">
+          <button data-plf="all" aria-pressed="true">All</button>
+          <button data-plf="up" aria-pressed="false">Rises</button>
+          <button data-plf="down" aria-pressed="false">Falls</button>
+          <button data-plf="mine" aria-pressed="false">Mine</button>
+        </div>
+        <span class="pl-note" id="plNote"></span>
+      </div>
+      <div id="plBody"></div>
+      <p class="note" id="plCaveat"></p>
+    </div>
+
     <div class="filters">
       <div class="seg" id="priceSeg" role="group" aria-label="Direction">
         <button data-dir="all" aria-pressed="true">All</button>
@@ -1349,6 +1421,6 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
      happily serve a cached index.html against a fresh js/, which is how you
      end up staring at an old page after a correct upload. Bump BUILD in both
      places when you ship, and the browser cannot get a mismatched pair. -->
-<script type="module" src="js/ui.js?v=11"></script>
+<script type="module" src="js/ui.js?v=12"></script>
 </body>
 </html>
