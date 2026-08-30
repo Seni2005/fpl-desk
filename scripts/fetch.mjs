@@ -234,6 +234,61 @@ function rankStatus(s) {
   return { a: 0, d: 1, s: 2, i: 3, u: 4, n: 5 }[s] ?? 9;
 }
 
+/** Keep roughly three weeks of price history: long enough to look back over a
+ *  couple of gameweeks, small enough to commit and to fetch on a phone. */
+const PRICE_LOG_DAYS = 21;
+
+/**
+ * Append-only record of price changes, with WHEN each was noticed.
+ *
+ * FPL does not publish a timestamp for a price change — the API only ever says
+ * what a player costs now. So the only honest timing available is our own: a
+ * change happened somewhere between the previous refresh and this one. Every
+ * row therefore carries a WINDOW (`after` … `seen`) rather than an instant, and
+ * the interface renders it as a window. Narrowing it is a matter of refreshing
+ * more often around the nightly change, which the cron now does.
+ */
+function updatePriceLog(prevLog, prevSnapshot, players, teams, gw, nowIso) {
+  const log = prevLog && Array.isArray(prevLog.changes) ? prevLog : { changes: [] };
+  const before = prevSnapshot && Array.isArray(prevSnapshot.players)
+    ? new Map(prevSnapshot.players.map((p) => [p.id, p]))
+    : null;
+
+  if (before) {
+    const after = prevSnapshot.generatedAt || null;
+    for (const p of players) {
+      const q = before.get(p.id);
+      if (!q || q.price === p.price) continue;
+      const t = teams.find((x) => x.id === p.team);
+      log.changes.push({
+        id: p.id,
+        name: p.name,
+        full: p.full,
+        team: p.team,
+        club: t ? t.short : "",
+        pos: p.pos,
+        from: q.price,
+        to: p.price,
+        delta: round(p.price - q.price, 1),
+        owned: p.owned,
+        gw,
+        // the change happened somewhere in (after, seen]
+        after,
+        seen: nowIso,
+      });
+    }
+  }
+
+  // Trim by age, then by count, so one pathological day cannot bloat the file.
+  const cutoff = Date.now() - PRICE_LOG_DAYS * 864e5;
+  log.changes = log.changes
+    .filter((c) => !c.seen || new Date(c.seen).getTime() >= cutoff)
+    .slice(-4000);
+  log.updated = nowIso;
+  log.days = PRICE_LOG_DAYS;
+  return log;
+}
+
 /**
  * Append-only time series, one row per player per gameweek. Rewriting the
  * current gameweek's row on each refresh keeps it to 38 rows a season rather
@@ -313,6 +368,7 @@ async function main() {
   // read before we overwrite, so the diff has something to compare against
   const prevSnapshot = await loadJson("snapshot.json", null);
   const prevTimeline = await loadJson("timeline.json", null);
+  const prevPriceLog = await loadJson("prices.json", null);
 
   console.log("Fetching bootstrap-static…");
   const boot = await get("/bootstrap-static/");
@@ -548,6 +604,12 @@ async function main() {
     `${changes.statusChanges.length} status, ${changes.formMovers.length} form, ${changes.ownershipMovers.length} ownership`
   );
 
+  const priceLog = updatePriceLog(
+    prevPriceLog, prevSnapshot, players, teams, gwForHistory, snapshot.generatedAt);
+  await writeFile(join(ROOT, "data", "prices.json"), JSON.stringify(priceLog));
+  const added = priceLog.changes.filter((c) => c.seen === snapshot.generatedAt).length;
+  console.log(`Wrote data/prices.json — ${added} new change(s), ${priceLog.changes.length} kept`);
+
   const timeline = updateTimeline(prevTimeline, players, gwForHistory);
   await writeFile(join(ROOT, "data", "timeline.json"), JSON.stringify(timeline));
   const tkb = Math.round(JSON.stringify(timeline).length / 1024);
@@ -559,7 +621,10 @@ async function main() {
   console.log(`Summary: ${flagged} flagged, ${rising} near a rise, ${falling} near a fall`);
 }
 
-main().catch((err) => {
+// Awaited at module scope on purpose: importing this file should not resolve
+// until the work is done. Without it a test harness that imports the module and
+// then reads data/ races the writes and sees the previous run's files.
+await main().catch((err) => {
   console.error("FAILED:", err);
   process.exit(1);
 });
