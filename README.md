@@ -21,19 +21,21 @@ answer has a **Why?** that unfolds the evidence behind it.
 - **Targets** — every player scored six ways (Overall, Short, Long, Value, Differential, Captain), each column sortable, each row carrying a sparkline of the last ten gameweeks and a caret that expands **in place** to fourteen underlying numbers (xG/90, xA/90, xGI/90, xGC/90, xMin, starts, BPS, defensive actions, ownership, EO, net transfers…) with a plain-language explanation on each.
 - **A price-against-points scatter** above the table, with both axes named in words, a median-value diagonal you read positionally, and a tooltip on every point. It follows the filters, so it always describes the list beneath it.
 - **Any player, in detail** — click a name anywhere for a breakdown of exactly why the algorithm rates him, what its main concern is, a simulated distribution for the next gameweek, previous seasons and upcoming fixtures.
-- **Price watch** with the financial impact on you, **fixture ticker** with swing markers, and the **injury board**.
+- **Price watch** — a record of every confirmed change (who moved, from what to what, which gameweek, and the time in Sydney) sitting above the prediction table, so what actually happened is never confused with what is merely due. Plus the financial impact on you, a **fixture ticker** with swing markers, and the **injury board**.
 
 ## How it works
 
 The FPL API sends no CORS headers, so a web page cannot call it directly from a browser. This project gets around that by doing the fetching on GitHub's servers instead:
 
 ```
-GitHub Actions (every 3 hours; every 15 min during weekend match windows)
+GitHub Actions (3-hourly; every 15 min for weekend matches and the
+                nightly price change)
   └─ scripts/fetch.mjs  ── calls the FPL API; also diffs against the previous
        │                    refresh and appends to the time series
        ├─ data/snapshot.json  ── players, teams, fixtures, every squad, leagues
        ├─ data/details.json   ── season-by-season and per-gameweek history
        ├─ data/changes.json   ── what moved since the last refresh
+       ├─ data/prices.json    ── every price change, with the window it landed in
        └─ data/timeline.json  ── one row per player per gameweek
             └─ js/engine.js   ── all the analysis. Pure functions, no DOM.
                  └─ js/ui.js  ── fetches, renders, wires. No analysis.
@@ -48,7 +50,7 @@ touches no DOM, which means the same code runs in the browser and under `node --
 in the engine instead.
 
 ```bash
-npm test          # 78 unit tests over the engine
+npm test          # 84 unit tests over the engine
 npm run refresh   # run the fetcher locally
 npm run palette   # regenerate and re-verify the difficulty ramp
 ```
@@ -203,6 +205,28 @@ Treat rank figures as directional.
 FPL sells a player back to you at your purchase price plus half of any rise since, rounded down. The API does not expose purchase prices without logging in, so the planner values your existing players at **today's market price**. For anyone you have held since the start that is exact; for someone who has risen since you bought them it can be optimistic by a tenth or two. If a plan lands within £0.2m of your budget, check it on the real site before committing.
 
 Free transfers are also not exposed by the public API, so there's a box in the planner header to set them yourself. It defaults to 1 and remembers what you set.
+
+## When a price actually changed
+
+**FPL never publishes when a price moved** — the API only ever says what a player
+costs right now. So the only honest timing is our own: a change happened
+somewhere between the refresh that still showed the old price and the one that
+showed the new.
+
+Every confirmed change is therefore stamped with a **window**, not an instant:
+
+- `10:38 am` — the two checks were 15 minutes apart, tight enough to quote.
+- `by 12:00 pm ±3h` — a wider gap, so it is a range. Hovering gives both ends.
+
+The refresh runs every fifteen minutes from 00:00–02:59 UTC, which covers FPL's
+nightly change under both BST and GMT. That is what turns "sometime in the last
+three hours" into a usable time. Changes are kept for 21 days, grouped by day in
+Sydney time and tagged with the gameweek they landed in, with your own players
+marked.
+
+This is deliberately kept apart from the progress bars below it. Those are a
+prediction built from net transfers; this is a record of what happened. A guess
+should never borrow the authority of a fact.
 
 ## Reading the price watch
 
