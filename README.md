@@ -48,7 +48,7 @@ touches no DOM, which means the same code runs in the browser and under `node --
 in the engine instead.
 
 ```bash
-npm test          # 73 unit tests over the engine
+npm test          # 78 unit tests over the engine
 npm run refresh   # run the fetcher locally
 npm run palette   # regenerate and re-verify the difficulty ramp
 ```
@@ -255,7 +255,7 @@ back in three bands:
 | Band | What it means |
 |---|---|
 | **You can make now** | Right position, affordable, under the club limit, not already yours |
-| **Blocked by money or the club limit** | Shown with how much short, or which club you are already full on — things you could clear by selling someone |
+| **Blocked by money or the club limit** | Shown with how much short, or how many you already hold from that club **and who they are** — things you could clear by selling someone |
 | **The rules won't allow** | Wrong position, or already in your squad. Nothing you can do about it |
 
 Each blocked row keeps its name, price and projection and loses only its button,
