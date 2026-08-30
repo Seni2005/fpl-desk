@@ -613,11 +613,19 @@ export function categorise(p) {
  * defender no matter how much money you have, so position beats budget.
  */
 export function replacementOptions(outPlayer, ctx, budget, squadIds = [], opts = {}) {
-  const owned = new Set(squadIds);
+  // De-duplicate. A malformed plan can map two slots onto the same id, and a
+  // duplicate silently inflates a club count — which reads to the user as the
+  // three-per-club rule firing a player early, with nothing on screen to
+  // explain it.
+  const ids = [...new Set(squadIds)];
+  const owned = new Set(ids);
   const clubCount = {};
-  squadIds.forEach((id) => {
+  const clubNames = {};
+  ids.forEach((id) => {
     const q = ctx.byId.get(id);
-    if (q && q.id !== outPlayer.id) clubCount[q.team] = (clubCount[q.team] || 0) + 1;
+    if (!q || q.id === outPlayer.id) return;
+    clubCount[q.team] = (clubCount[q.team] || 0) + 1;
+    (clubNames[q.team] = clubNames[q.team] || []).push(q.name);
   });
   const ceiling = round(budget + outPlayer.price, 1);
   const q = (opts.query || '').trim().toLowerCase();
@@ -647,9 +655,15 @@ export function replacementOptions(outPlayer, ctx, budget, squadIds = [], opts =
       blockedText = 'already yours';
       blockedWhy = 'He is already in this squad.';
     } else if ((clubCount[p.team] || 0) >= MAX_PER_CLUB) {
+      // Print the REAL count, never the constant. A message that says "3 from
+      // ARS" when you can see two on the pitch is unfalsifiable, and naming
+      // them turns the claim into something you can check at a glance.
+      const n = clubCount[p.team];
       blocked = 'club';
-      blockedText = `${MAX_PER_CLUB} from ${club}`;
-      blockedWhy = `You already have ${MAX_PER_CLUB} players from ${club}, which is the limit. Sell one first.`;
+      blockedText = `${n} from ${club}`;
+      blockedWhy = `Counting ${outPlayer.name} out, this squad already has ${n} from ${club}` +
+        (clubNames[p.team] ? ` (${clubNames[p.team].join(', ')})` : '') +
+        `. The limit is ${MAX_PER_CLUB}.`;
       fixable = true;
     } else if (short > 1e-6) {
       blocked = 'budget';
