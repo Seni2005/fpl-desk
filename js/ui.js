@@ -9,9 +9,9 @@ import {
   buildContext, weeklyAdvice, teamHealth, optimalXI, captainRanking,
   transferAlternatives, replacementOptions, evaluatePlan, categorise, fixtureSwings,
   ownershipOpportunity, templateDiff, simulatePlayer,
-  gameweekState, playerTraits, CHIPS, matchSchedule, selectEntry,
+  gameweekState, playerTraits, CHIPS, matchSchedule, selectEntry, priceChanges,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB,
-} from './engine.js?v=11';
+} from './engine.js?v=12';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -33,7 +33,7 @@ const ordinal = (n) => {
   return n.toLocaleString() + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
-let CTX = null, CHANGES = null, DETAILS = {}, TEAM = new Map();
+let CTX = null, CHANGES = null, PRICELOG = null, DETAILS = {}, TEAM = new Map();
 /** Lifecycle of the round, and which gameweek every recommendation targets. */
 let GW = null;
 /** Which gameweek the visual sandbox is currently editing. */
@@ -384,19 +384,33 @@ function renderChanges() {
 
   const mine = new Set(CTX.squad.map((s) => s.id));
   $('#changedNote').textContent = CHANGES.since
-    ? `since ${new Date(CHANGES.since).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` +
+    ? `since ${new Date(CHANGES.since).toLocaleString('en-AU', { timeZone: TZ, weekday: 'short', hour: 'numeric', minute: '2-digit' })} Sydney` +
       (seen ? '' : ' · first visit')
     : 'first refresh';
+
+  // When each price move was actually detected, so a row here answers the same
+  // question the confirmed-changes panel does rather than just "recently".
+  const when = new Map();
+  (PRICELOG && PRICELOG.changes ? PRICELOG.changes : []).forEach((c) => {
+    const prev = when.get(c.id);
+    if (!prev || String(c.seen) > String(prev.seen)) when.set(c.id, c);
+  });
 
   $('#changedBody').innerHTML = groups.filter((g) => (CHANGES[g.key] || []).length).map((g) => {
     const rows = CHANGES[g.key].slice(0, 10);
     return `<div class="chg"><span class="lab">${g.title} <i>${CHANGES[g.key].length}</i></span><ul>` +
       rows.map((r) => {
         const cls = typeof g.cls === 'function' ? g.cls(r) : g.cls;
+        const isPrice = g.key === 'priceRises' || g.key === 'priceFalls';
+        const c = isPrice ? when.get(r.id) : null;
+        const w = c ? changeWhen({ ...c, exact: c.after &&
+          (new Date(c.seen) - new Date(c.after)) / 60000 <= 20,
+          spanMin: c.after ? Math.round((new Date(c.seen) - new Date(c.after)) / 60000) : null }) : null;
         return `<li${mine.has(r.id) ? ' class="own"' : ''} title="${esc(r.name + ' — ' + g.fmt(r).replace(/<[^>]+>/g, ''))}">` +
           `<span class="badge">${esc(r.team)}</span>` +
           `<span class="who" data-pid="${r.id}">${esc(r.name)}</span>` +
           (mine.has(r.id) ? '<span class="tag mine">yours</span>' : '') +
+          (w ? `<span class="chg-when" title="${esc(w.tip)}">${esc(w.text)}${w.wide ? ' ±' + esc(w.wide) : ''}</span>` : '') +
           `<span class="chg-v ${cls}">${g.fmt(r)}</span></li>`;
       }).join('') + '</ul></div>';
   }).join('');
@@ -1678,6 +1692,103 @@ function renderTeamTag() {
   el.onclick = () => { selectEntry(CTX, false); renderTeamTag(); renderAll(); openTeamGate(); };
 }
 
+/* ═════════════════ confirmed price changes ═════════════════ */
+
+let PL_FILTER = 'all';
+
+/**
+ * A time, or a window, depending on what the data can support.
+ *
+ * FPL never says when a price moved — only what a player costs now. All we
+ * honestly know is that it changed between two refreshes. When those are
+ * minutes apart that is a time; when they are hours apart it is a range, and
+ * printing a single clock face would be inventing precision.
+ */
+function changeWhen(c) {
+  const t = (iso) => new Date(iso).toLocaleTimeString('en-AU',
+    { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+  if (!c.after) return { text: t(c.seen), tip: 'First refresh that saw this price.' };
+  if (c.exact) {
+    return {
+      text: t(c.seen), wide: null,
+      tip: `Detected at ${t(c.seen)}, and the previous check ${c.spanMin} minutes earlier still ` +
+        `showed £${c.from.toFixed(1)}m — so it changed inside that window.`,
+    };
+  }
+  // A wide window printed as "9:00 am–12:00 pm" is two lines of clock face for
+  // one fact. "by 12:00 pm" with the span beside it says the same thing in the
+  // width available, and the full window is on hover.
+  const span = c.spanMin >= 90 ? `${Math.round(c.spanMin / 60)}h` : `${c.spanMin}m`;
+  return {
+    text: `by ${t(c.seen)}`, wide: span,
+    tip: `The check at ${t(c.after)} still showed £${c.from.toFixed(1)}m and the one at ` +
+      `${t(c.seen)} showed £${c.to.toFixed(1)}m — a ${span} window. FPL does not publish a ` +
+      `change time, so this is when it happened, not a guess at the minute.`,
+  };
+}
+
+function renderPriceLog() {
+  const box = $('#pricelog');
+  const all = priceChanges(PRICELOG, CTX, { tz: TZ });
+  if (!all.count) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const keep = (c) => PL_FILTER === 'all' ? true
+    : PL_FILTER === 'up' ? c.up
+    : PL_FILTER === 'down' ? !c.up
+    : c.yours;
+
+  $$('#plSeg [data-plf]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.plf === PL_FILTER)));
+  $('#plNote').textContent =
+    `${all.count} in the last ${(PRICELOG && PRICELOG.days) || 21} days · ` +
+    `${all.rises} up, ${all.falls} down · ${all.mine} of yours · Sydney time`;
+
+  const days = all.days.map((d) => ({ ...d, rows: d.rows.filter(keep) })).filter((d) => d.rows.length);
+  if (!days.length) {
+    $('#plBody').innerHTML = '<p class="note">No changes match that filter.</p>';
+  } else {
+    $('#plBody').innerHTML = days.map((d) => {
+      const rows = d.rows.map((c) => {
+        const w = changeWhen(c);
+        return `<div class="pl-row${c.yours ? ' mine' : ''}">` +
+          `<span class="pl-when${c.exact ? ' exact' : ''}" title="${esc(w.tip)}">${esc(w.text)}` +
+            (w.wide ? `<i>±${esc(w.wide)}</i>` : '') + '</span>' +
+          `<span class="badge">${esc(c.club || '')}</span>` +
+          `<span class="who" data-pid="${c.id}">${esc(c.name)}</span>` +
+          `<span class="pl-pos">${esc(c.pos)}</span>` +
+          (c.yours ? '<span class="tag mine">yours</span>' : '<span></span>') +
+          '<span></span>' +
+          `<span class="pl-move ${c.up ? 'u' : 'd'}">` +
+            `<span class="num">£${c.from.toFixed(1)}</span>` +
+            `<i>${c.up ? '▲' : '▼'}</i>` +
+            `<span class="num strong">£${c.to.toFixed(1)}</span></span>` +
+          `<span class="pl-own num">${c.owned.toFixed(1)}%</span>` +
+          '</div>';
+      }).join('');
+      return `<div class="pl-day"><div class="pl-daylab">` +
+        `<span class="lab">${esc(dayLabel(d.key))}</span>` +
+        `<span class="pl-gw">GW${d.gw}</span>` +
+        `<span class="pl-tally"><b class="u">${d.rises}▲</b> <b class="d">${d.falls}▼</b></span>` +
+        `</div>${rows}</div>`;
+    }).join('');
+  }
+
+  // Said once, here, rather than repeated on every row.
+  const w = Math.round(all.widest || 0);
+  $('#plCaveat').textContent =
+    'FPL never publishes when a price changed, only what a player costs now. ' +
+    `Each time above is the window between the refresh that still showed the old price and the one that showed the new — ` +
+    (all.tightest <= 20
+      ? `as tight as ${all.tightest} minutes on recent nights, ${w >= 60 ? `up to ${Math.round(w / 60)}h` : `${w} min`} on older ones.`
+      : `currently up to ${w >= 60 ? `${Math.round(w / 60)}h` : `${w} min`} wide.`) +
+    ' The table below this is the opposite: a prediction of what is coming, not a record of what happened.';
+
+  $$('#plSeg [data-plf]').forEach((b) => b.addEventListener('click', () => {
+    PL_FILTER = b.dataset.plf; renderPriceLog();
+  }));
+  $$('#plBody .who').forEach((el) => el.addEventListener('click', () => openPlayer(Number(el.dataset.pid))));
+}
+
 /** Everything that depends on data or mode. Called on boot and on mode change. */
 function renderAll() {
   renderTeamTag();
@@ -1691,6 +1802,7 @@ function renderAll() {
   renderPlanner();
   renderChanges();
   renderShelves();
+  renderPriceLog();
   renderPrices();
   renderTargets();
   renderTicker();
@@ -1714,9 +1826,11 @@ Promise.all([
   fetch('data/snapshot.json' + bust).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }),
   grab('data/details.json', {}),
   grab('data/changes.json', null),
-]).then(([snap, details, changes]) => {
+  grab('data/prices.json', null),
+]).then(([snap, details, changes, prices]) => {
   DETAILS = details || {};
   CHANGES = changes;
+  PRICELOG = prices;
   // A ?team= in the URL skips the chooser, so a direct link can go straight to
   // one manager. Otherwise nothing is selected yet and the gate decides.
   const asked = new URLSearchParams(location.search).get('team');
