@@ -1252,3 +1252,67 @@ export function matchSchedule(ctx, gw, tz = 'Australia/Sydney') {
   return { gw, tz, days, count: matches.length,
     yours: matches.filter((m) => m.yours).length };
 }
+
+/* ══════════════════════ confirmed price changes ══════════════════════ */
+
+/**
+ * The price changes we have actually observed, newest first, grouped by the
+ * day they landed on in a named time zone.
+ *
+ * This is deliberately separate from the price PREDICTIONS elsewhere on the
+ * page. Those are an estimate built from net transfers; these are a record of
+ * what happened. Mixing them would let a guess borrow the authority of a fact.
+ *
+ * Each row carries a WINDOW rather than an instant, because FPL never publishes
+ * when a price moved — only what a player costs now. `after` is the refresh
+ * that still showed the old price and `seen` the one that showed the new, so
+ * the change happened somewhere between them. `exact` says whether that window
+ * is tight enough to quote as a time (≤ 20 minutes) or should be read as a
+ * range. Do not collapse the window to a single timestamp: it would be a
+ * number the data cannot support.
+ */
+export function priceChanges(log, ctx, opts = {}) {
+  const tz = opts.tz || 'Australia/Sydney';
+  const rows = (log && Array.isArray(log.changes) ? log.changes : []).slice();
+  if (!rows.length) return { tz, days: [], count: 0, mine: 0, rises: 0, falls: 0 };
+
+  const mine = new Set((ctx && ctx.squad ? ctx.squad : []).map((s) => s.id));
+  const dayKey = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+
+  const enriched = rows.map((c) => {
+    const t = new Date(c.seen).getTime();
+    const from = c.after ? new Date(c.after).getTime() : null;
+    const spanMin = from == null ? null : Math.max(0, Math.round((t - from) / 60000));
+    return {
+      ...c,
+      up: c.to > c.from,
+      yours: mine.has(c.id),
+      dayKey: Number.isFinite(t) ? dayKey.format(new Date(t)) : 'unknown',
+      spanMin,
+      // a window this tight reads as a time; anything wider is a range
+      exact: spanMin != null && spanMin <= 20,
+    };
+  }).sort((a, b) => String(b.seen).localeCompare(String(a.seen)) || b.owned - a.owned);
+
+  const days = [];
+  for (const c of enriched) {
+    let d = days.find((x) => x.key === c.dayKey);
+    if (!d) { d = { key: c.dayKey, gw: c.gw, rows: [], rises: 0, falls: 0, mine: 0 }; days.push(d); }
+    d.rows.push(c);
+    if (c.up) d.rises++; else d.falls++;
+    if (c.yours) d.mine++;
+  }
+
+  return {
+    tz, days, count: enriched.length,
+    mine: enriched.filter((c) => c.yours).length,
+    rises: enriched.filter((c) => c.up).length,
+    falls: enriched.filter((c) => !c.up).length,
+    // how precisely we can date these at all, so the UI can say so once
+    // rather than repeating a caveat on every row
+    tightest: enriched.reduce((m, c) => (c.spanMin == null ? m : Math.min(m, c.spanMin)), Infinity),
+    widest: enriched.reduce((m, c) => (c.spanMin == null ? m : Math.max(m, c.spanMin)), 0),
+  };
+}
