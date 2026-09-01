@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FPL Desk</title>
 <meta name="description" content="Squad, prices, fixtures and transfer targets for Fantasy Premier League.">
-<meta name="build" content="12">
+<meta name="build" content="13">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0B0D0E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -846,6 +846,59 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
   white-space:nowrap;margin-left:auto;cursor:help}
 .chg-when + .chg-v{margin-left:8px}
 
+/* ── team news ─────────────────────────────────────────────────
+   One item per flagged player: the text FPL published, the date
+   FPL put on it, and how bad it is as a severity rule down the
+   left. A feed is a list of things that happened, so it is laid
+   out as one — not as cards. */
+#nfBody{border:1px solid var(--rule);border-bottom:none}
+.nf-item{display:grid;grid-template-columns:3px minmax(0,1fr) auto;gap:0 12px;
+  align-items:start;padding:9px 12px;border-bottom:1px solid var(--rule);
+  background:var(--paper)}
+.nf-item:hover{background:var(--paper-2)}
+.nf-item.mine{background:var(--paper-2)}
+.nf-sev{align-self:stretch;background:var(--ink-3)}
+.nf-sev.bad{background:var(--flag)} .nf-sev.warn{background:var(--doubt)}
+.nf-sev.susp{background:var(--susp)}
+.nf-top{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.nf-pos{font-family:"JetBrains Mono",monospace;font-size:9.5px;color:var(--ink-3)}
+.nf-text{margin:4px 0 0;font-size:13px;color:var(--ink-2);line-height:1.45;max-width:74ch}
+.nf-text b{color:var(--ink);font-weight:600}
+.nf-side{display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+  font-family:"JetBrains Mono",monospace;font-size:11px;white-space:nowrap}
+.nf-when{font-size:10px;color:var(--ink-3);cursor:help}
+.nf-when.dim{opacity:.6;cursor:default}
+.nf-own{color:var(--ink-3);font-size:10px}
+#nfCaveat{padding:9px 12px 0;margin:0}
+@media (max-width:640px){
+  .nf-item{grid-template-columns:3px minmax(0,1fr);gap:0 10px}
+  .nf-side{flex-direction:row;align-items:baseline;gap:10px;grid-column:2;padding-top:5px}
+}
+
+/* ── captaincy ─────────────────────────────────────────────────
+   Two columns because it is two questions: what everyone else is
+   doing, and what beating them would take. */
+.capwrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.capcol{background:var(--paper);padding:11px 13px}
+.capcol > .lab{display:block;margin-bottom:8px}
+.cap-row{display:grid;grid-template-columns:34px minmax(0,1fr) 90px 52px 66px;
+  align-items:center;gap:9px;height:26px;border-bottom:1px solid var(--rule);font-size:12.5px}
+.cap-row:last-child{border-bottom:none}
+.cap-row.mine{font-weight:600}
+.cap-row .num{text-align:right;font-size:11.5px}
+.cap-bar{display:block;height:6px;background:var(--paper-3);position:relative;
+  outline:1px solid var(--rule);outline-offset:-1px}
+.cap-bar i{position:absolute;inset:0 auto 0 0;background:var(--ink-2);display:block}
+.cap-row.mine .cap-bar i{background:var(--ink)}
+.cap-why{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ink-3);
+  white-space:nowrap;text-align:right}
+#capCaveat{padding-top:10px;margin:0}
+@media (max-width:560px){
+  .cap-row{grid-template-columns:30px minmax(0,1fr) 48px 60px;gap:7px}
+  .cap-bar{display:none}
+}
+
 /* ── confirmed price changes ───────────────────────────────────
    A record, sitting deliberately above the prediction table. The
    two must never read as one system: a guess borrowing the
@@ -1043,6 +1096,16 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
 .man .sc.dbl{background:var(--live);color:#fff}
 /* a projection, not a result — held back so it never reads as a live score */
 .man .sc.proj{background:var(--ink-3);color:var(--paper)}
+/* not a score at all: he has not kicked off yet. Deliberately not a number,
+   because a 0 here reads as a blank and it is not one. */
+.man .sc.yet{background:transparent;color:var(--ink-2);
+  outline:1px dashed var(--rule-2);outline-offset:-1px;font-size:clamp(8px,2.1vw,9.5px);
+  letter-spacing:.04em;text-transform:uppercase}
+/* on the pitch right now — the one plate allowed to pulse */
+.man .sc.live{position:relative}
+.man .sc.live::after{content:"";position:absolute;top:2px;right:2px;width:4px;height:4px;
+  border-radius:50%;background:var(--live);animation:pulse 1.9s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.man .sc.live::after{animation:none}}
 /* a settled score: still the result, but no longer moving — so it drops the
    live red and sits as plain ink */
 .man .sc.dbl.fin{background:var(--ink);color:var(--paper)}
@@ -1057,41 +1120,151 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
   overflow:hidden}
 [data-mode="decision"] .pitch{border-radius:var(--card-r) var(--card-r) 0 0}
 
-/* ── planner sandbox ── */
-.sandbox{background:var(--card-bg);border:var(--card-bd);border-radius:var(--card-r);
+/* ── the transfer screen ──
+   Two panes: the squad you have and the market you can reach. A 1px rule is
+   the only thing between them, because they are one decision, not two screens. */
+.tx{background:var(--card-bg);border:var(--card-bd);border-radius:var(--card-r);
   overflow:hidden;margin-bottom:var(--stack)}
-.sb-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 18px;
-  border-bottom:1px solid var(--rule)}
-[data-mode="analyst"] .sb-head{padding:13px 0}
+.tx-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:11px 16px;
+  border-bottom:1px solid var(--rule);background:var(--paper-2)}
 .sb-gws{display:inline-flex;border:1px solid var(--rule-2)}
 .sb-gws button{padding:5px 11px;font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.08em;
   color:var(--ink-3);border-right:1px solid var(--rule-2)}
 .sb-gws button:last-child{border-right:none}
 .sb-gws button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
 .sb-gws button.haschip::after{content:"•";margin-left:4px;color:var(--live)}
-.budget{margin-left:auto;display:flex;align-items:baseline;gap:9px}
-.budget b{font-family:"JetBrains Mono",monospace;font-size:22px;font-weight:600;letter-spacing:-.03em}
-.budget b.d{color:var(--badc)} .budget b.u{color:var(--good)}
-.sb-hint{font-size:12.5px;color:var(--ink-3);padding:9px 18px 0}
-[data-mode="analyst"] .sb-hint{padding:9px 0 0}
+
+/* the counters — every number that constrains the next move, in one strip */
+.tx-counts{display:flex;align-items:stretch;border:1px solid var(--rule-2)}
+.tx-count{display:flex;flex-direction:column;gap:1px;padding:4px 12px;
+  border-right:1px solid var(--rule-2);min-width:64px}
+.tx-count:last-child{border-right:none}
+.tx-count .lab{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.tx-count b{font-family:"JetBrains Mono",monospace;font-size:15px;font-weight:600;letter-spacing:-.02em;
+  line-height:1.15;color:var(--ink)}
+.tx-count b small{font-size:.68em;font-weight:400;opacity:.6;letter-spacing:0}
+.tx-count.warn b{color:var(--warnc)} .tx-count.bad b{color:var(--badc)}
+.tx-tools{margin-left:auto;display:flex;align-items:center;gap:12px}
+.tx-shape{display:inline-flex;align-items:center;gap:7px}
+.tx-shape select{font-family:"JetBrains Mono",monospace;font-size:11.5px;padding:4px 6px;
+  border:1px solid var(--rule-2);background:var(--paper);color:var(--ink)}
+.tx-shape select:disabled{opacity:.4}
+
+.tx-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,380px)}
+.tx-left{min-width:0;border-right:1px solid var(--rule)}
+/* Vertical only. This is a list you scroll down, never across, and a stray
+   pixel of horizontal slack would put a scrollbar under every row. */
+.tx-side{min-width:0;display:flex;flex-direction:column;background:var(--paper-2);
+  max-height:min(78vh,760px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+.sb-hint{font-size:12.5px;color:var(--ink-3);padding:9px 16px 0}
+.sb-warn{color:var(--warnc);font-weight:600}
+
+.tx-act{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:11px 16px;border-top:1px solid var(--rule);background:var(--paper-2)}
+.tx-btns{display:flex;gap:8px;flex-wrap:wrap}
+.tx-act .linkbtn{margin-left:auto}
+
+/* the market pane */
+.mk-head{display:flex;align-items:flex-start;gap:10px;padding:12px 14px 0}
+.mk-head .lab{display:block}
+.mk-sub{display:block;font-size:11.5px;color:var(--ink-3);margin-top:2px}
+.mk-head .linkbtn{margin-left:auto;flex:none}
+.mk-tools{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;
+  align-items:center;padding:10px 14px 0}
+.mk-tools .altsearch{grid-column:1/-1;min-width:0}
+.mk-sortwrap{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:6px;min-width:0}
+.mk-sortwrap select{font-size:11.5px;padding:4px 6px;border:1px solid var(--rule-2);
+  background:var(--paper);color:var(--ink);min-width:0;width:100%}
+.mk-pos{margin:10px 14px 0}
+.mk-chips{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px;margin-top:8px}
+.mk-chips:empty{margin-top:0}
+.fchip{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border:1px solid var(--rule-2);
+  font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.04em;color:var(--ink-2)}
+.fchip i{font-style:normal;opacity:.6}
+.fchip:hover{border-color:var(--badc);color:var(--badc)}
+.mk-note{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3);padding:10px 14px 0}
+#mkList{padding:6px 14px 14px}
+#mkList .plist{margin-top:4px}
+/* Two lines per row: who he is, then what he costs you and what he gives back.
+   One line cannot hold a name, a club, a reason, the fixture and a button in
+   380px without truncating the only part you were reading. */
+#mkList .plist li.alt{display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:8px 0}
+.alt-top,.alt-bot{display:flex;align-items:center;gap:7px;min-width:0}
+.alt-top .who{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alt-pos{font-family:"JetBrains Mono",monospace;font-size:9.5px;letter-spacing:.08em;color:var(--ink-3)}
+.alt-price{margin-left:auto;flex:none}
+.alt-bot .alt-why,.alt-bot .tag.block{flex:1 1 auto;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+/* The drawer's narrow-screen rule drops `.rt` onto its own full-width line.
+   These rows are already two lines, so that one would be a third — and a
+   100%-wide right group beside an ellipsis overflows the pane by its own gap. */
+#mkList .plist .rt{margin-left:auto;flex:none;width:auto;padding-top:0;gap:8px}
+#mkList .plist .rt .num small{font-size:.72em;opacity:.55}
+.mk-fx{display:inline-flex;gap:1px}
+.mk-fx .fx{min-width:30px;justify-content:center}
+
+/* the filter drawer */
+.fset label{display:grid;grid-template-columns:150px minmax(0,1fr);align-items:center;
+  gap:12px;padding:9px 0;border-bottom:1px solid var(--rule)}
+.fset label .lab{grid-column:1}
+.fset select,.fset input[type=range]{grid-column:2;width:100%;font-size:12.5px;
+  padding:5px 7px;border:1px solid var(--rule-2);background:var(--paper);color:var(--ink)}
+.fset input[type=range]{padding:0;border:none;background:none;accent-color:var(--ink)}
+.fset output{grid-column:2;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--ink-2);
+  justify-self:end;margin-top:-4px}
+.fset-act{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
 /* AFFORDANCE 5 — a swappable player.
-   In the sandbox every shirt is a target, so it needs to look like one before
-   it is touched, not only on hover: a dashed ring says "this can move" the way
-   a drag handle would, and fills solid the moment you point at it. */
+   On the transfer screen every shirt is a target, so it needs to look like one
+   before it is touched, not only on hover: a dashed ring says "this can move"
+   the way a drag handle would, and fills solid the moment you point at it. */
+.manwrap{position:relative;display:flex}
+.line>.manwrap{width:clamp(56px,17vw,102px)}
+.manwrap>.man{width:100%}
+/* The cross sits outside the shirt, on the left, because the right shoulder is
+   already taken by the status and price pins — two circles fighting for the
+   same corner reads as one broken control. */
+.manwrap>.man .pins{right:auto;left:4px}
+.man-x{position:absolute;top:-4px;right:-2px;z-index:5;width:17px;height:17px;line-height:1;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;
+  background:var(--paper);color:var(--ink-3);border:1px solid var(--rule-2)}
+.man-x:hover{background:var(--badc);color:#fff;border-color:var(--badc)}
+.man-x.undo{font-size:11px;color:var(--ink-2)}
+.man-x.undo:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .man.swappable{cursor:pointer}
 .man.swappable .nm{outline:1px dashed var(--ink-3);outline-offset:1px}
 .man.swappable:hover .nm{outline:2px solid var(--ink);outline-offset:1px}
-.man.swappable::after{content:"⇄";position:absolute;top:-3px;right:2px;z-index:4;
-  font-size:9px;line-height:1;padding:2px 3px;background:var(--paper);color:var(--ink-3);
-  border:1px solid var(--rule-2);opacity:0;transition:opacity .1s linear}
-.man.swappable:hover::after,.man.swappable:focus-visible::after{opacity:1}
 .man.swappable:focus-visible .nm{outline:2px solid var(--paper);outline-offset:1px}
 .man.staged .nm{background:var(--live);color:#fff;outline-color:var(--live)}
-@media (hover:none){.man.swappable::after{opacity:1}}
+.man.sel .nm{background:var(--ink);color:var(--paper);outline:2px solid var(--ink);outline-offset:1px}
+.man.dragging{opacity:.45}
+.man.dragover .nm{outline:2px dashed var(--live);outline-offset:2px}
+.man .pr{font-family:"JetBrains Mono",monospace;font-size:clamp(8px,2.1vw,9.5px);color:var(--ink-3);
+  letter-spacing:.02em;margin-top:2px}
+/* an empty shirt: the gap sits where the gap is */
+.man.empty{justify-content:flex-start;padding-top:2px}
+.man.empty .ghost{display:flex;align-items:center;justify-content:center;
+  width:46px;height:46px;border:1px dashed var(--rule-2);color:var(--ink-3);
+  font-size:20px;line-height:1;background:var(--paper-2)}
+.man.empty .nm{background:transparent;color:var(--ink-3);outline:1px dashed var(--ink-3);
+  font-family:"JetBrains Mono",monospace;letter-spacing:.06em}
+.man.empty:hover .nm,.man.empty.sel .nm{background:var(--ink);color:var(--paper);outline-color:var(--ink)}
+.man .sc.slot{background:transparent;color:var(--good);border:1px solid var(--rule-2)}
+
+/* the fifteen as a table */
+.sqlist tr.sel td{background:var(--paper-3)}
+.sqlist tr.staged .who{color:var(--live)}
+.sqlist tr.hole td{color:var(--ink-3);font-style:italic}
+.sqlist tr.grp td{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);padding-top:14px;border-bottom:1px solid var(--ink-3)}
+.sqlist td.fxc,.sqlist th.l+th+th+th+th{padding-left:14px}
+.sqlist td.fxc .fx{display:inline-flex;min-width:34px;justify-content:center}
+.sqlist .who.lk{font:inherit;color:inherit}
+.sqlist td.r,.sqlist th:last-child{text-align:right}
 
 /* ── chips ── */
-.chiprow{display:flex;gap:8px;flex-wrap:wrap;padding:12px 18px;border-top:1px solid var(--rule)}
-[data-mode="analyst"] .chiprow{padding:12px 0}
+.chiprow{display:flex;gap:8px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--rule)}
 .chip{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid var(--rule-2);
   border-radius:var(--card-r);font-size:12.5px;font-weight:600;color:var(--ink-2);background:var(--paper)}
 .chip i{font-style:normal;font-size:14px;line-height:1}
@@ -1135,6 +1308,41 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
   .modehint{right:8px;left:8px;max-width:none}
   .budget{margin-left:0;width:100%;padding-top:8px}
 }
+
+/* The market pane sits beside the pitch while there is width for both. Below
+   that it stacks under it — still the same list, still the same controls, just
+   one under the other, because a 300px column beside a pitch on a phone is two
+   unusable things instead of one usable one. */
+@media (max-width:1040px){
+  .tx-body{grid-template-columns:minmax(0,1fr)}
+  .tx-left{border-right:none;border-bottom:1px solid var(--rule)}
+  /* Still a scrolling panel when it is underneath rather than beside. Forty
+     rows unrolled makes the transfer screen four thousand pixels tall and
+     buries the action bar. */
+  .tx-side{max-height:70vh}
+  .tx-tools{margin-left:0;width:100%}
+}
+@media (max-width:640px){
+  .tx-bar,.tx-act{padding:10px 12px}
+  .tx-counts{width:100%;overflow-x:auto}
+  .tx-count{flex:1 1 0;min-width:58px;padding:4px 8px}
+  .tx-count b{font-size:13.5px}
+  .mk-tools .altsearch{flex:1 1 100%}
+  .mk-sortwrap select{max-width:none}
+  .fset label{grid-template-columns:1fr;gap:5px}
+  .fset label .lab,.fset select,.fset input[type=range],.fset output{grid-column:1}
+  .fset output{justify-self:start}
+}
+/* Analyst mode strips the card chrome everywhere else, so it strips it here
+   too — the rules stay, the padding goes. */
+[data-mode="analyst"] .tx-bar,[data-mode="analyst"] .tx-act{padding:11px 0}
+[data-mode="analyst"] .sb-hint{padding:9px 0 0}
+[data-mode="analyst"] .chiprow{padding:12px 0}
+[data-mode="analyst"] .tx-left{padding-right:16px}
+@media (max-width:1040px){ [data-mode="analyst"] .tx-left{padding-right:0} }
+/* The market keeps its own padding in both modes. It is an inset panel with a
+   ground of its own, and a row whose button touches the outer edge reads as
+   clipped whatever the mode is doing to the rest of the page. */
 .linkbtn{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--ink-3);text-decoration:underline;text-underline-offset:3px;padding:0}
 .linkbtn:hover{color:var(--ink)}
@@ -1213,15 +1421,62 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
       </div>
     </div>
     <div id="planCompare"></div>
-    <div class="sandbox" id="sandbox" hidden>
-      <div class="sb-head">
-        <span class="lab">Editing</span>
+
+    <!-- The transfer screen: the squad on the left, the market on the right.
+         They answer one question between them, so they sit side by side. -->
+    <div class="tx" id="sandbox" hidden>
+      <div class="tx-bar">
         <div class="sb-gws" id="sbGws" role="group" aria-label="Gameweek to edit"></div>
-        <div class="budget"><span class="lab">In the bank</span><b id="sbBank">£0.0</b></div>
+        <div class="tx-counts" id="sbCounts"></div>
+        <div class="tx-tools">
+          <label class="tx-shape"><span class="lab">Shape</span>
+            <select id="sbFormation" aria-label="Formation"></select></label>
+          <div class="seg" id="sbView" role="group" aria-label="How to show the squad">
+            <button data-sbview="pitch" aria-pressed="true">Pitch</button>
+            <button data-sbview="list" aria-pressed="false">List</button>
+          </div>
+        </div>
       </div>
-      <div class="sb-hint" id="sbHint"></div>
-      <div id="sbPitch"></div>
-      <div class="chiprow" id="sbChips"></div>
+
+      <div class="tx-body">
+        <div class="tx-left">
+          <div class="sb-hint" id="sbHint"></div>
+          <div id="sbPitch"></div>
+          <div class="chiprow" id="sbChips"></div>
+        </div>
+
+        <aside class="tx-side" aria-label="Player market">
+          <div class="mk-head">
+            <div><span class="lab" id="mkTitle">Market</span>
+              <span class="mk-sub" id="mkSub"></span></div>
+            <button class="linkbtn" id="mkClear" hidden>clear slot</button>
+          </div>
+          <div class="mk-tools">
+            <div class="altsearch">
+              <input type="search" id="mkQ" autocomplete="off" spellcheck="false"
+                     placeholder="Search any player or club&hellip;" aria-label="Search the market">
+              <button class="linkbtn" id="mkQClear" hidden>clear</button>
+            </div>
+            <label class="mk-sortwrap"><span class="lab">Rank by</span>
+              <select id="mkSort" aria-label="Rank the market by"></select></label>
+            <button class="btn" id="mkFilters">Filters</button>
+          </div>
+          <div class="seg mk-pos" id="mkPos" role="group" aria-label="Position"></div>
+          <div class="mk-chips" id="mkChips"></div>
+          <div class="mk-note" id="mkNote"></div>
+          <div id="mkList"></div>
+        </aside>
+      </div>
+
+      <div class="tx-act">
+        <div class="tx-btns">
+          <button class="btn" id="sbAuto" title="Let the projections pick the eleven">Auto-pick XI</button>
+          <button class="btn go" id="sbFill" hidden>Fill empty slots</button>
+          <button class="btn" id="sbClear" title="Empty all fifteen shirts — how a wildcard build starts">Clear squad</button>
+          <button class="btn" id="sbUndo">Reset gameweek</button>
+        </div>
+        <button class="linkbtn" id="coachOpen">How this works</button>
+      </div>
     </div>
     <div id="planProblems"></div>
     <div id="planWeeks"></div>
@@ -1371,8 +1626,40 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
     </table></div>
   </section>
 
+  <section id="newsfeed" hidden>
+    <div class="head">
+      <h2>Team news</h2>
+      <div class="meta">
+        <div class="seg" id="nfSeg" role="group" aria-label="Filter news">
+          <button data-nf="all" aria-pressed="true">All</button>
+          <button data-nf="mine" aria-pressed="false">Mine</button>
+          <button data-nf="out" aria-pressed="false">Out</button>
+          <button data-nf="doubt" aria-pressed="false">Doubtful</button>
+        </div>
+        <span id="nfNote"></span>
+      </div>
+    </div>
+    <div id="nfBody"></div>
+    <p class="note" id="nfCaveat"></p>
+  </section>
+
+  <section id="captaincy" class="analyst-only" hidden>
+    <div class="head"><h2>Captaincy</h2><div class="meta" id="capNote"></div></div>
+    <div class="capwrap">
+      <div class="capcol">
+        <span class="lab">Who the field is captaining</span>
+        <div id="capPopular"></div>
+      </div>
+      <div class="capcol">
+        <span class="lab">Worth going against them with</span>
+        <div id="capDiff"></div>
+      </div>
+    </div>
+    <p class="note" id="capCaveat"></p>
+  </section>
+
   <section id="news" class="analyst-only" hidden>
-    <div class="head"><h2>Injuries &amp; bans</h2><div class="meta">From the official FPL feed</div></div>
+    <div class="head"><h2>Injuries &amp; bans, by club</h2><div class="meta">From the official FPL feed</div></div>
     <div class="clubs" id="clubs"></div>
   </section>
 
@@ -1421,6 +1708,6 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
      happily serve a cached index.html against a fresh js/, which is how you
      end up staring at an old page after a correct upload. Bump BUILD in both
      places when you ship, and the browser cannot get a mismatched pair. -->
-<script type="module" src="js/ui.js?v=12"></script>
+<script type="module" src="js/ui.js?v=13"></script>
 </body>
 </html>
