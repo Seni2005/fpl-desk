@@ -464,6 +464,10 @@ async function main() {
       status: el.status, // a=available i=injured d=doubtful s=suspended u=unavailable n=not in squad
       news: el.news || "",
       newsAt: el.news_added,
+      ict: num(el.ict_index),
+      influence: num(el.influence),
+      creativity: num(el.creativity),
+      threat: num(el.threat),
       chance: el.chance_of_playing_next_round,
       form: num(el.form),
       pts: el.total_points || 0,
