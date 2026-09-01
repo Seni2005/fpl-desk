@@ -533,6 +533,258 @@ export function optimalXI(squadPlayers, gwIndex = 0, key = null) {
   return best;
 }
 
+/* ─────────────────────── lineups you arrange yourself ───────────────────── */
+
+/** How many of each position an eleven contains. */
+export function xiCounts(xi) {
+  const c = { GKP: 0, DEF: 0, MID: 0, FWD: 0 };
+  xi.forEach((p) => { if (c[p.pos] != null) c[p.pos] += 1; });
+  return c;
+}
+
+/** Every FPL rule about the shape of a starting eleven, in one place. */
+export function shapeProblem(c) {
+  const total = c.GKP + c.DEF + c.MID + c.FWD;
+  if (c.GKP !== 1) return c.GKP < 1 ? 'You need a goalkeeper in the eleven.' : 'Only one goalkeeper can start.';
+  if (c.DEF < 3) return `That would leave ${c.DEF} defender${c.DEF === 1 ? '' : 's'} — you need at least three.`;
+  if (c.DEF > 5) return 'Five defenders is the most you can play.';
+  if (c.MID < 2) return `That would leave ${c.MID} midfielder${c.MID === 1 ? '' : 's'} — you need at least two.`;
+  if (c.MID > 5) return 'Five midfielders is the most you can play.';
+  if (c.FWD < 1) return 'You need at least one forward.';
+  if (c.FWD > 3) return 'Three forwards is the most you can play.';
+  if (total !== 11) return `That makes ${total} players, not eleven.`;
+  return null;
+}
+export const legalShape = (c) => shapeProblem(c) === null;
+export const formationName = (c) => `${c.DEF}-${c.MID}-${c.FWD}`;
+
+/** The reserve keeper occupies the first bench slot; the rest keep their order. */
+function orderBench(list) {
+  const gk = list.filter((p) => p.pos === 'GKP');
+  return [...gk, ...list.filter((p) => p.pos !== 'GKP')];
+}
+
+/**
+ * Finish a part-built eleven: keep everyone already chosen, then fill the gaps
+ * with the best available under whichever legal formation scores highest.
+ * Returns null when the players on hand cannot make a legal shape at all.
+ */
+function completeXI(kept, pool, value) {
+  const byPos = { GKP: [], DEF: [], MID: [], FWD: [] };
+  pool.forEach((p) => { if (byPos[p.pos]) byPos[p.pos].push(p); });
+  Object.keys(byPos).forEach((k) => byPos[k].sort((a, b) => value(b) - value(a)));
+  const have = xiCounts(kept);
+
+  let best = null;
+  for (const f of FORMATIONS) {
+    const need = { GKP: 1 - have.GKP, DEF: f.DEF - have.DEF, MID: f.MID - have.MID, FWD: f.FWD - have.FWD };
+    if (Object.values(need).some((n) => n < 0)) continue;                 // already over that line
+    if (Object.keys(need).some((k) => need[k] > byPos[k].length)) continue; // not enough left
+    const add = ['GKP', 'DEF', 'MID', 'FWD'].flatMap((k) => byPos[k].slice(0, need[k]));
+    const xi = [...kept, ...add];
+    const points = xi.reduce((s, p) => s + value(p), 0);
+    if (!best || points > best.points) best = { formation: f.name, shape: f, xi, points: round(points, 2) };
+  }
+  return best;
+}
+
+/**
+ * The eleven to field, honouring a lineup the user arranged by hand.
+ *
+ * A manual lineup has to survive transfers. Selling a bench player should not
+ * silently rearrange the eleven you spent a minute setting up, and selling a
+ * starter should replace only him. So the manual XI is filtered down to the
+ * players still owned, then completed — and only a lineup that cannot be
+ * repaired at all falls back to the optimiser.
+ */
+export function arrangeXI(squadPlayers, gwIndex = 0, manual = null, key = null) {
+  const value = (p) => (key ? key(p) : (p.proj && p.proj[gwIndex]) || 0);
+  const auto = optimalXI(squadPlayers, gwIndex, key);
+  const ids = manual && Array.isArray(manual.xi) ? manual.xi : null;
+  if (!ids || !ids.length) return auto ? { ...auto, manual: false, repaired: false } : null;
+
+  const byId = new Map(squadPlayers.map((p) => [p.id, p]));
+  const kept = [...new Set(ids)].map((id) => byId.get(id)).filter(Boolean).slice(0, 11);
+  const keptIds = new Set(kept.map((p) => p.id));
+  const pool = squadPlayers.filter((p) => !keptIds.has(p.id));
+
+  const built = completeXI(kept, pool, value);
+  if (!built) return auto ? { ...auto, manual: false, repaired: true } : null;
+
+  const inXI = new Set(built.xi.map((p) => p.id));
+  const rest = squadPlayers.filter((p) => !inXI.has(p.id));
+  // the bench keeps the order you gave it, with anyone new appended
+  const order = new Map((manual.bench || []).map((id, i) => [id, i]));
+  rest.sort((a, b) => (order.has(a.id) ? order.get(a.id) : 99) - (order.has(b.id) ? order.get(b.id) : 99));
+
+  built.bench = orderBench(rest);
+  built.captain = built.xi.slice().sort((a, b) => value(b) - value(a))[0] || null;
+  built.vice = built.xi.slice().sort((a, b) => value(b) - value(a))[1] || null;
+  built.manual = true;
+  built.repaired = kept.length !== built.xi.length;
+  return built;
+}
+
+/**
+ * Swap two players between the eleven and the bench, or reorder the bench.
+ * Returns the new id lists, or the reason the swap is not allowed — phrased as
+ * the rule it would break, because "invalid formation" tells you nothing about
+ * what to do instead.
+ */
+export function swapLineup(arrangement, aId, bId) {
+  const xi = arrangement.xi.slice();
+  const bench = arrangement.bench.slice();
+  const at = (list, id) => list.findIndex((p) => p.id === id);
+  const ax = at(xi, aId), bx = at(xi, bId), ab = at(bench, aId), bb = at(bench, bId);
+  const a = ax >= 0 ? xi[ax] : ab >= 0 ? bench[ab] : null;
+  const b = bx >= 0 ? xi[bx] : bb >= 0 ? bench[bb] : null;
+  if (!a || !b || a.id === b.id) return { ok: false, error: 'Pick two different players.' };
+
+  if (ab >= 0 && bb >= 0) {
+    const next = bench.slice();
+    next[ab] = b; next[bb] = a;
+    if (a.pos === 'GKP' || b.pos === 'GKP') {
+      return { ok: false, error: 'The reserve keeper stays in the first bench slot — swap him with your starting keeper instead.' };
+    }
+    return { ok: true, xi: xi.map((p) => p.id), bench: next.map((p) => p.id),
+      formation: formationName(xiCounts(xi)) };
+  }
+  if (ax >= 0 && bx >= 0) return { ok: false, error: 'Both are already in your eleven.' };
+
+  const starter = ax >= 0 ? a : b;
+  const sub = ax >= 0 ? b : a;
+  if ((starter.pos === 'GKP') !== (sub.pos === 'GKP')) {
+    return { ok: false, error: 'A goalkeeper can only swap with the other goalkeeper.' };
+  }
+  const nextXI = xi.map((p) => (p.id === starter.id ? sub : p));
+  const counts = xiCounts(nextXI);
+  const problem = shapeProblem(counts);
+  if (problem) return { ok: false, error: problem };
+  const nextBench = orderBench(bench.map((p) => (p.id === sub.id ? starter : p)));
+  return { ok: true, xi: nextXI.map((p) => p.id), bench: nextBench.map((p) => p.id),
+    formation: formationName(counts) };
+}
+
+/**
+ * Move the whole squad into a named formation, keeping as many of the current
+ * starters as that shape allows — so changing 4-4-2 to 3-5-2 drops one defender
+ * and promotes one midfielder rather than rebuilding the eleven from scratch.
+ */
+export function applyFormation(arrangement, name, gwIndex = 0, key = null) {
+  const f = FORMATIONS.find((x) => x.name === name);
+  if (!f) return { ok: false, error: `${name} is not a legal formation.` };
+  const value = (p) => (key ? key(p) : (p.proj && p.proj[gwIndex]) || 0);
+  const all = [...arrangement.xi, ...arrangement.bench];
+  const starting = new Set(arrangement.xi.map((p) => p.id));
+
+  const pick = (pos, n) => {
+    const list = all.filter((p) => p.pos === pos).sort((x, y) => {
+      const sx = starting.has(x.id) ? 1 : 0, sy = starting.has(y.id) ? 1 : 0;
+      return sy - sx || value(y) - value(x);
+    });
+    return list.slice(0, n);
+  };
+  const gk = pick('GKP', 1), def = pick('DEF', f.DEF), mid = pick('MID', f.MID), fwd = pick('FWD', f.FWD);
+  if (gk.length < 1 || def.length < f.DEF || mid.length < f.MID || fwd.length < f.FWD) {
+    return { ok: false, error: `You do not have the players for ${name} — that needs ${f.DEF} defenders, ${f.MID} midfielders and ${f.FWD} forwards.` };
+  }
+  const xi = [...gk, ...def, ...mid, ...fwd];
+  const inXI = new Set(xi.map((p) => p.id));
+  const bench = orderBench(all.filter((p) => !inXI.has(p.id)).sort((x, y) => value(y) - value(x)));
+  return { ok: true, xi: xi.map((p) => p.id), bench: bench.map((p) => p.id), formation: name };
+}
+
+/**
+ * Fill empty slots with the best legal squad the money will reach.
+ *
+ * Greedy, one slot at a time, but never spending money the slots still to come
+ * will need. Before each pick it prices the cheapest legal way to finish — the
+ * k cheapest buyable players at each remaining position, recomputed against the
+ * squad as it stands, so the club limit and the players already taken both
+ * count. Whatever is left over that floor is what this slot may spend.
+ *
+ * A slot that still cannot be filled comes back in `unfilled` rather than being
+ * quietly dropped, because a squad that is silently fourteen players is worse
+ * than one that says which shirt is still empty.
+ *
+ * This is a starting point, not a solved squad. It is what makes fifteen empty
+ * shirts usable at all; the picks after it are the user's.
+ */
+export function fillSlots(ctx, squadIds, holes, bank, opts = {}) {
+  let ids = (squadIds || []).filter((id) => id != null);
+  let money = bank;
+  const queue = holes.slice();
+  const fills = [], unfilled = [];
+
+  /** Cheapest legal way to fill the slots still queued, given who is owned. */
+  const floor = () => {
+    const owned = new Set(ids);
+    const clubs = {};
+    ids.forEach((id) => { const q = ctx.byId.get(id); if (q) clubs[q.team] = (clubs[q.team] || 0) + 1; });
+    const need = {};
+    queue.forEach((h) => { need[h.pos] = (need[h.pos] || 0) + 1; });
+    let total = 0;
+    for (const [pos, k] of Object.entries(need)) {
+      const prices = ctx.players
+        .filter((p) => p.pos === pos && p.status === 'a' && !owned.has(p.id) &&
+          (clubs[p.team] || 0) < MAX_PER_CLUB)
+        .map((p) => p.price).sort((a, b) => a - b).slice(0, k);
+      if (prices.length < k) return Infinity;       // cannot be finished at all
+      total += prices.reduce((s, v) => s + v, 0);
+    }
+    return total;
+  };
+
+  while (queue.length) {
+    const h = queue.shift();
+    const reserve = floor();
+    const budget = round(money - (Number.isFinite(reserve) ? reserve : 0), 1);
+    const rows = slotOptions(h.pos, ctx, budget, ids, {
+      filter: { legalOnly: true, avail: 'fit', sort: opts.sort || 'gain' }, limit: 1,
+    });
+    if (!rows.length) { unfilled.push(h); continue; }
+    const pick = rows[0].player;
+    fills.push({ out: h.out, pos: h.pos, player: pick });
+    ids = [...ids, pick.id];
+    money = round(money - pick.price, 1);
+  }
+
+  /* Spend what is left.
+   *
+   * The pass above has to hold money back for the slots it has not reached, so
+   * it finishes under budget — sometimes far under. Leaving that in the bank is
+   * not caution, it is points you did not buy. So each round finds the single
+   * upgrade that adds the most and takes it, until nothing left is worth the
+   * money. One swap at a time, because a squad is a set of one-slot decisions
+   * and the best next move is the only one worth being sure about. */
+  const rounds = opts.upgrade === false ? 0 : 24;
+  for (let i = 0; i < rounds && money > 0.05 && fills.length; i++) {
+    let best = null;
+    for (const f of fills) {
+      const others = ids.filter((id) => id !== f.player.id);
+      const cand = slotOptions(f.pos, ctx, round(money + f.player.price, 1), others, {
+        filter: { legalOnly: true, avail: 'fit', sort: opts.sort || 'gain' }, limit: 1,
+      })[0];
+      if (!cand || cand.player.id === f.player.id) continue;
+      const lift = cand.player.scores.overall - f.player.scores.overall;
+      if (lift > 1e-6 && (!best || lift > best.lift)) best = { f, to: cand.player, lift };
+    }
+    if (!best) break;
+    money = round(money + best.f.player.price - best.to.price, 1);
+    ids = ids.map((id) => (id === best.f.player.id ? best.to.id : id));
+    best.f.player = best.to;
+  }
+
+  return { fills, bank: money, unfilled };
+}
+
+/** Which formations this squad could actually field. */
+export function availableFormations(squadPlayers) {
+  const c = xiCounts(squadPlayers);
+  return FORMATIONS.filter((f) => c.GKP >= 1 && c.DEF >= f.DEF && c.MID >= f.MID && c.FWD >= f.FWD)
+    .map((f) => f.name);
+}
+
 /* ──────────────────────────── team health ──────────────────────────────── */
 
 const BENCHMARK = { xpts: 55, value: 5.5, benchPts: 8 };
@@ -613,31 +865,62 @@ export function categorise(p) {
  * defender no matter how much money you have, so position beats budget.
  */
 export function replacementOptions(outPlayer, ctx, budget, squadIds = [], opts = {}) {
+  return scanMarket(ctx, {
+    pos: outPlayer.pos,
+    ceiling: round(budget + outPlayer.price, 1),
+    squadIds, out: outPlayer,
+    query: opts.query, limit: opts.limit, filter: opts.filter,
+  });
+}
+
+/**
+ * The same list for an EMPTY slot — a shirt you have already sold out of.
+ *
+ * The difference from `replacementOptions` is entirely in the money: the sold
+ * player's fee is already sitting in the bank, so the ceiling is the bank
+ * itself rather than bank-plus-price, and he is buyable again like anyone else.
+ * Everything about how a block is explained is shared, because the club rule
+ * getting this wrong once was enough.
+ */
+export function slotOptions(pos, ctx, budget, squadIds = [], opts = {}) {
+  return scanMarket(ctx, {
+    pos, ceiling: round(budget, 1), squadIds, out: null,
+    query: opts.query, limit: opts.limit, filter: opts.filter,
+  });
+}
+
+/**
+ * Every player the market can offer for one slot, each carrying the reason it
+ * would or would not be legal. `out` is the player being sold, or null when the
+ * slot is already empty.
+ */
+function scanMarket(ctx, spec) {
+  const outPlayer = spec.out || null;
   // De-duplicate. A malformed plan can map two slots onto the same id, and a
   // duplicate silently inflates a club count — which reads to the user as the
   // three-per-club rule firing a player early, with nothing on screen to
   // explain it.
-  const ids = [...new Set(squadIds)];
+  const ids = [...new Set(spec.squadIds || [])].filter((id) => id != null);
   const owned = new Set(ids);
   const clubCount = {};
   const clubNames = {};
   ids.forEach((id) => {
     const q = ctx.byId.get(id);
-    if (!q || q.id === outPlayer.id) return;
+    if (!q || (outPlayer && q.id === outPlayer.id)) return;
     clubCount[q.team] = (clubCount[q.team] || 0) + 1;
     (clubNames[q.team] = clubNames[q.team] || []).push(q.name);
   });
-  const ceiling = round(budget + outPlayer.price, 1);
-  const q = (opts.query || '').trim().toLowerCase();
+  const ceiling = spec.ceiling;
+  const q = (spec.query || '').trim().toLowerCase();
 
   const rows = [];
   for (const p of ctx.players) {
-    if (p.id === outPlayer.id) continue;
+    if (outPlayer && p.id === outPlayer.id) continue;
     if (q) {
       const t = ctx.teams.get(p.team) || {};
       const hay = `${p.full || ''} ${p.name} ${t.name || ''} ${t.short || ''} ${p.pos}`.toLowerCase();
       if (hay.indexOf(q) === -1) continue;
-    } else if (p.pos !== outPlayer.pos) {
+    } else if (spec.pos !== 'all' && p.pos !== spec.pos) {
       continue;                       // the ranked list stays like-for-like
     }
 
@@ -646,10 +929,12 @@ export function replacementOptions(outPlayer, ctx, budget, squadIds = [], opts =
     // `blockedText` is a chip, so it must stay short enough not to wrap;
     // `blockedWhy` is the full sentence for the tooltip.
     let blocked = null, blockedText = null, blockedWhy = null, fixable = false;
-    if (p.pos !== outPlayer.pos) {
+    if (spec.pos !== 'all' && p.pos !== spec.pos) {
       blocked = 'position';
-      blockedText = `${p.pos}, not ${outPlayer.pos}`;
-      blockedWhy = `FPL only allows like-for-like swaps — a ${p.pos} cannot replace a ${outPlayer.pos}.`;
+      blockedText = `${p.pos}, not ${spec.pos}`;
+      blockedWhy = outPlayer
+        ? `FPL only allows like-for-like swaps — a ${p.pos} cannot replace a ${outPlayer.pos}.`
+        : `This slot is a ${spec.pos}. A ${p.pos} cannot fill it.`;
     } else if (owned.has(p.id)) {
       blocked = 'owned';
       blockedText = 'already yours';
@@ -661,7 +946,8 @@ export function replacementOptions(outPlayer, ctx, budget, squadIds = [], opts =
       const n = clubCount[p.team];
       blocked = 'club';
       blockedText = `${n} from ${club}`;
-      blockedWhy = `Counting ${outPlayer.name} out, this squad already has ${n} from ${club}` +
+      blockedWhy = (outPlayer ? `Counting ${outPlayer.name} out, this` : 'This') +
+        ` squad already has ${n} from ${club}` +
         (clubNames[p.team] ? ` (${clubNames[p.team].join(', ')})` : '') +
         `. The limit is ${MAX_PER_CLUB}.`;
       fixable = true;
@@ -672,19 +958,26 @@ export function replacementOptions(outPlayer, ctx, budget, squadIds = [], opts =
       fixable = true;
     }
 
-    const gain = round(p.scores.overall - outPlayer.scores.overall, 2);
+    const gain = round(outPlayer ? p.scores.overall - outPlayer.scores.overall : p.scores.overall, 2);
     const reasons = [];
-    const fdrOut = mean(outPlayer.fixtures.slice(0, 5).map((f) => (f.blank ? 4 : f.difficulty)));
-    const fdrIn = mean(p.fixtures.slice(0, 5).map((f) => (f.blank ? 4 : f.difficulty)));
-    if (fdrOut - fdrIn > 0.4) reasons.push(`kinder fixtures (${fdrIn.toFixed(1)} vs ${fdrOut.toFixed(1)})`);
-    if (p.per90.xGI > outPlayer.per90.xGI * 1.25 && p.per90.xGI > 0.25) reasons.push(`higher xGI/90 (${p.per90.xGI.toFixed(2)})`);
-    if (p.avail > outPlayer.avail + 0.15) reasons.push(`safer minutes (${Math.round(p.avail * 100)}%)`);
-    if (p.scores.value > outPlayer.scores.value * 1.15) reasons.push(`better value at £${p.price.toFixed(1)}`);
-    if (p.eo < 10 && p.scores.overall > outPlayer.scores.overall) reasons.push(`low ownership at ${p.eo.toFixed(1)}%`);
+    const fdrIn = fdrAhead(p, 5);
+    if (outPlayer) {
+      const fdrOut = fdrAhead(outPlayer, 5);
+      if (fdrOut - fdrIn > 0.4) reasons.push(`kinder fixtures (${fdrIn.toFixed(1)} vs ${fdrOut.toFixed(1)})`);
+      if (p.per90.xGI > outPlayer.per90.xGI * 1.25 && p.per90.xGI > 0.25) reasons.push(`higher xGI/90 (${p.per90.xGI.toFixed(2)})`);
+      if (p.avail > outPlayer.avail + 0.15) reasons.push(`safer minutes (${Math.round(p.avail * 100)}%)`);
+      if (p.scores.value > outPlayer.scores.value * 1.15) reasons.push(`better value at £${p.price.toFixed(1)}`);
+      if (p.eo < 10 && p.scores.overall > outPlayer.scores.overall) reasons.push(`low ownership at ${p.eo.toFixed(1)}%`);
+    } else {
+      // Nothing to compare against, so the row argues for the player on his own
+      // terms — the same traits the detail panel would show.
+      (p.traits || []).slice(0, 2).forEach((t) => reasons.push(t.label.toLowerCase()));
+      if (!reasons.length && fdrIn <= 2.8) reasons.push(`kind fixtures (${fdrIn.toFixed(1)})`);
+    }
 
     rows.push({
       player: p, gain,
-      spend: round(p.price - outPlayer.price, 1),
+      spend: round(p.price - (outPlayer ? outPlayer.price : 0), 1),
       short: short > 0 ? short : 0,
       legal: !blocked,
       blocked, blockedText, blockedWhy,
@@ -693,15 +986,61 @@ export function replacementOptions(outPlayer, ctx, budget, squadIds = [], opts =
       fixable,
       // kept for callers written against the old shape
       atClubLimit: blocked === 'club',
-      reason: reasons.slice(0, 2).join(', ') || 'higher projection',
+      reason: reasons.slice(0, 2).join(', ') || (outPlayer ? 'higher projection' : 'available'),
     });
   }
 
+  return finishMarket(rows, spec.filter, spec.limit);
+}
+
+/** Average fixture difficulty over the next `n` gameweeks; a blank counts as 4. */
+export function fdrAhead(p, n = 5) {
+  const f = (p.fixtures || []).slice(0, n);
+  return f.length ? mean(f.map((x) => (x.blank ? 4 : x.difficulty))) : 3;
+}
+
+/**
+ * The columns you can rank the market by. `of` reads one number off a row; a
+ * negative reading means "lower is better", which is how fixtures sort kindest
+ * first without a second flag to keep track of.
+ */
+export const MARKET_SORTS = [
+  { key: 'gain',  label: 'Projected gain', of: (r) => r.gain },
+  { key: 'proj',  label: 'Next GW',        of: (r) => (r.player.proj && r.player.proj[0]) || 0 },
+  { key: 'form',  label: 'Form',           of: (r) => Number(r.player.form) || 0 },
+  { key: 'pts',   label: 'Total points',   of: (r) => r.player.pts || 0 },
+  { key: 'price', label: 'Price',          of: (r) => r.player.price },
+  { key: 'owned', label: 'Ownership',      of: (r) => r.player.owned || 0 },
+  { key: 'ict',   label: 'ICT index',      of: (r) => Number(r.player.ict) || 0 },
+  { key: 'fix',   label: 'Fixtures',       of: (r) => -fdrAhead(r.player, 3) },
+];
+
+/**
+ * Narrow the market and rank it.
+ *
+ * Blocked rows never climb above legal ones however you sort — the list has to
+ * stay a list of things you can actually do, with the rest underneath as an
+ * explanation rather than an obstacle.
+ */
+export function finishMarket(rows, filter, limit) {
+  const f = filter || {};
+  let out = rows;
+  if (f.pos && f.pos !== 'all') out = out.filter((r) => r.player.pos === f.pos);
+  if (f.team) out = out.filter((r) => r.player.team === Number(f.team));
+  if (f.maxPrice != null) out = out.filter((r) => r.player.price <= f.maxPrice + 1e-9);
+  if (f.minPrice != null) out = out.filter((r) => r.player.price >= f.minPrice - 1e-9);
+  if (f.avail === 'fit') out = out.filter((r) => r.player.status === 'a');
+  else if (f.avail === 'flagged') out = out.filter((r) => r.player.status !== 'a');
+  if (f.maxFdr != null) out = out.filter((r) => fdrAhead(r.player, 3) <= f.maxFdr + 1e-9);
+  if (f.legalOnly) out = out.filter((r) => r.legal);
+
+  const sort = MARKET_SORTS.find((s) => s.key === f.sort) || MARKET_SORTS[0];
   // Three bands: what you can do now, what you could do after freeing something
-  // up, and what the rules will never allow. Within each, by what they add.
+  // up, and what the rules will never allow. Within each, by the chosen column.
   const band = (r) => (r.legal ? 0 : r.fixable ? 1 : 2);
-  rows.sort((a, b) => band(a) - band(b) || b.gain - a.gain);
-  return opts.limit ? rows.slice(0, opts.limit) : rows;
+  out = out.slice().sort((a, b) => band(a) - band(b) || sort.of(b) - sort.of(a) ||
+    b.gain - a.gain || a.player.name.localeCompare(b.player.name));
+  return limit ? out.slice(0, limit) : out;
 }
 
 /**
@@ -770,7 +1109,10 @@ export function gameweekState(ctx) {
   }
   if (phase === 'settled') {
     return { ...base, phase,
-      headline: `GW${liveGw} final`,
+      // Said in words rather than as a status colour: "GW3 final" reads as a
+      // label, "Gameweek 3 finished" reads as a fact, and this is the state
+      // people check when they want to know whether their score is done moving.
+      headline: `Gameweek ${liveGw} finished`,
       detail: `All ${total} matches played.` +
         (deadlineText ? ` GW${targetGw} deadline ${deadlineText}.` : '') +
         ` Advice below is for GW${targetGw}.` };
@@ -849,7 +1191,14 @@ export const CHIPS = {
  * bank and the accumulated hits, and totals the projected points from the best
  * legal XI in every week. Two plans evaluated this way are directly comparable.
  *
- * plan = { name, weeks: [{ gw, transfers: [{ out: id, in: id }] }] }
+ * plan = { name, weeks: [{ gw, transfers: [{ out: id, in: id }], chip, xi: [ids] }] }
+ *
+ * A transfer with `in: null` is an EMPTY SLOT: the player has been sold, the
+ * money is in the bank, and the shirt is waiting. FPL itself has no such state
+ * — a transfer there is atomic — but a wildcard is built by emptying several
+ * slots and refilling them one at a time, so the intermediate state has to be
+ * representable or the whole flow collapses back into one-for-one swaps. An
+ * empty slot costs nothing and counts as no transfer until it is filled.
  */
 export function evaluatePlan(plan, ctx, opts = {}) {
   const freePerWeek = opts.freeTransfers == null ? 1 : opts.freeTransfers;
@@ -883,10 +1232,22 @@ export function evaluatePlan(plan, ctx, opts = {}) {
     const squadBefore = squad.slice();
     const bankBefore = bank;
 
+    const holes = [];
     moves.forEach((t) => {
-      const outP = ctx.byId.get(t.out), inP = ctx.byId.get(t.in);
-      if (!outP || !inP) { problems.push(`GW${gw}: unknown player in a transfer`); return; }
+      const outP = ctx.byId.get(t.out);
+      if (!outP) { problems.push(`GW${gw}: unknown player in a transfer`); return; }
       if (!squad.includes(t.out)) { problems.push(`GW${gw}: ${outP.name} is not in the squad by then`); return; }
+      if (t.in == null) {
+        // Sold, not yet replaced. The shirt stays on the pitch as an empty slot
+        // so you can see the hole you have to fill and the money you have to
+        // fill it with.
+        bank = round(bank + outP.price, 1);
+        squad = squad.map((id) => (id === t.out ? null : id));
+        holes.push({ out: t.out, pos: outP.pos, name: outP.name, price: outP.price });
+        return;
+      }
+      const inP = ctx.byId.get(t.in);
+      if (!inP) { problems.push(`GW${gw}: unknown player in a transfer`); return; }
       if (squad.includes(t.in)) { problems.push(`GW${gw}: ${inP.name} is already owned`); return; }
       if (inP.pos !== outP.pos) { problems.push(`GW${gw}: ${inP.name} is a ${inP.pos}, ${outP.name} a ${outP.pos}`); return; }
       bank = round(bank + outP.price - inP.price, 1);
@@ -894,6 +1255,10 @@ export function evaluatePlan(plan, ctx, opts = {}) {
     });
 
     if (bank < -1e-9) problems.push(`GW${gw}: over budget by £${Math.abs(bank).toFixed(1)}m`);
+    if (holes.length) {
+      problems.push(`GW${gw}: ${holes.length} empty slot${holes.length === 1 ? '' : 's'} ` +
+        `(${holes.map((h) => h.pos).join(', ')}) — the projection below counts ${15 - holes.length} players`);
+    }
     const clubs = {};
     squad.forEach((id) => { const q = ctx.byId.get(id); if (q) clubs[q.team] = (clubs[q.team] || 0) + 1; });
     Object.entries(clubs).forEach(([tid, n]) => {
@@ -903,7 +1268,10 @@ export function evaluatePlan(plan, ctx, opts = {}) {
       }
     });
 
-    const used = moves.length;
+    // An empty slot is not a transfer yet. It costs nothing and spends nothing
+    // until something goes into it.
+    const used = moves.filter((t) => t.in != null).length;
+    const freeNow = unlimited ? Infinity : banked;   // what THIS week had to spend
     const paid = unlimited ? 0 : Math.max(0, used - banked);
     const hit = paid * HIT_COST;
     // playing a chip preserves the free transfer rather than spending it
@@ -911,7 +1279,10 @@ export function evaluatePlan(plan, ctx, opts = {}) {
     else banked = Math.min(5, banked + freePerWeek);
 
     const players = squad.map((id) => ctx.byId.get(id)).filter(Boolean);
-    const best = optimalXI(players, idx);
+    // A lineup the user arranged by hand outranks the optimiser — but only for
+    // as long as it is still legal. `arrangeXI` repairs it around transfers
+    // rather than silently throwing it away.
+    const best = arrangeXI(players, idx, step && step.xi ? { xi: step.xi, bench: step.bench } : null);
 
     // Captaincy is worth an extra copy of the armband's projection — two more
     // under Triple Captain. Bench Boost scores all fifteen instead of eleven.
@@ -932,6 +1303,11 @@ export function evaluatePlan(plan, ctx, opts = {}) {
       captainMultiplier: capMult,
       benchCounted: chip === 'bboost',
       squad: squad.slice(),
+      holes,
+      xi: best ? best.xi.map((p) => p.id) : [],
+      bench: best ? best.bench.map((p) => p.id) : [],
+      manualXI: !!(best && best.manual),
+      used, free: freeNow, unlimited,
     });
 
     if (chip === 'freehit') { squad = squadBefore; bank = bankBefore; }
@@ -1314,5 +1690,177 @@ export function priceChanges(log, ctx, opts = {}) {
     // rather than repeating a caveat on every row
     tightest: enriched.reduce((m, c) => (c.spanMin == null ? m : Math.min(m, c.spanMin)), Infinity),
     widest: enriched.reduce((m, c) => (c.spanMin == null ? m : Math.max(m, c.spanMin)), 0),
+  };
+}
+
+/* ════════════════ has this player's match started? ════════════════ */
+
+/**
+ * Where one player sits in the round being played.
+ *
+ * A player whose club has not kicked off has NOT scored nil — he has not
+ * played. Rendering both as "0" is the difference between "he blanked" and
+ * "he is still to come", which is the single most misread number on a live
+ * FPL page, and it changes what you do about it.
+ *
+ * Returns one of:
+ *   'upcoming'  the round has no scores at all yet
+ *   'notyet'    his club's match in this round has not kicked off
+ *   'playing'   his club is on the pitch right now
+ *   'played'    his club's match has finished
+ * plus `kickoff` so the UI can say when, and `counts` for whether the points
+ * figure means anything yet.
+ */
+export function playerMatchState(player, ctx, gwState) {
+  const gw = gwState || gameweekState(ctx);
+  const live = ctx.snapshot.live;
+  if (gw.phase === 'upcoming' || !live || !live.fixtures || !live.fixtures.length) {
+    return { state: 'upcoming', counts: false, kickoff: null, label: null, fixture: null };
+  }
+
+  const fixtures = live.fixtures.filter((f) => f.h === player.team || f.a === player.team);
+  if (!fixtures.length) {
+    // A blank gameweek for his club: no fixture at all, which is not the same
+    // as not having started one.
+    return { state: 'blank', counts: true, kickoff: null, label: 'No fixture', fixture: null };
+  }
+
+  // A double gameweek is "still to come" until the LAST match is done, and
+  // "playing" if any is live.
+  const anyLive = fixtures.some((f) => f.started && !f.finished);
+  const allDone = fixtures.every((f) => f.finished);
+  const noneStarted = fixtures.every((f) => !f.started);
+  const next = fixtures.find((f) => !f.started) || fixtures[fixtures.length - 1];
+
+  if (anyLive) {
+    const f = fixtures.find((q) => q.started && !q.finished);
+    return { state: 'playing', counts: true, kickoff: f.kickoff, label: 'Playing', fixture: f };
+  }
+  if (noneStarted) {
+    return { state: 'notyet', counts: false, kickoff: next.kickoff, label: 'Yet to play', fixture: next };
+  }
+  if (allDone) {
+    return { state: 'played', counts: true, kickoff: null, label: null, fixture: fixtures[fixtures.length - 1] };
+  }
+  // part of a double played, part still to come
+  return { state: 'notyet', counts: true, kickoff: next.kickoff, label: 'One to come', fixture: next };
+}
+
+/* ═══════════════════════════ the news feed ═══════════════════════════ */
+
+/** How long a flag typically keeps someone out, worst first. */
+const NEWS_RANK = { u: 0, n: 1, i: 2, s: 3, d: 4, a: 5 };
+
+/**
+ * Everything FPL actually publishes as news, newest first.
+ *
+ * Scope note, deliberately narrow: FPL's API carries availability text and a
+ * `news_added` timestamp, and nothing else. There are no transfers, no press
+ * conferences and no rumours in it. Rather than pad this with a third party's
+ * headlines, the feed reports what the game itself says — which is the part
+ * that actually changes your team — and the UI says that is what it is.
+ *
+ * Availability items carry their own timestamp from FPL. Price and ownership
+ * items are dated by our own detection, so they are marked `dated: 'observed'`
+ * to keep the two kinds of certainty apart.
+ */
+export function newsFeed(ctx, opts = {}) {
+  const limit = opts.limit || 60;
+  const mine = new Set((ctx.squad || []).map((s) => s.id));
+  const items = [];
+
+  for (const p of ctx.players) {
+    if (!p.news || !String(p.news).trim()) continue;
+    const t = ctx.teams.get(p.team) || {};
+    // "Knee injury - Expected back 21 Sep" → split the return date out, because
+    // when he is back is the part that decides whether you sell or hold.
+    const m = String(p.news).match(/^(.*?)\s*-\s*(Expected back.*)$/i);
+    items.push({
+      kind: 'availability',
+      id: p.id, name: p.name, full: p.full, club: t.short || '', team: p.team, pos: p.pos,
+      status: p.status,
+      headline: m ? m[1].trim() : String(p.news).trim(),
+      back: m ? m[2].trim() : null,
+      chance: p.chance,
+      at: p.newsAt || null,
+      dated: 'fpl',
+      owned: p.owned,
+      price: p.price,
+      yours: mine.has(p.id),
+      severity: NEWS_RANK[p.status] == null ? 5 : NEWS_RANK[p.status],
+    });
+  }
+
+  items.sort((a, b) => {
+    // your own players first, then the worst news, then the newest
+    if (a.yours !== b.yours) return a.yours ? -1 : 1;
+    if (a.severity !== b.severity) return a.severity - b.severity;
+    return String(b.at || '').localeCompare(String(a.at || '')) || b.owned - a.owned;
+  });
+
+  return {
+    items: items.slice(0, limit),
+    total: items.length,
+    yours: items.filter((i) => i.yours).length,
+    out: items.filter((i) => i.status === 'i' || i.status === 'u' || i.status === 'n').length,
+    doubt: items.filter((i) => i.status === 'd').length,
+    suspended: items.filter((i) => i.status === 's').length,
+  };
+}
+
+/* ═══════════════════════ captaincy popularity ═══════════════════════ */
+
+/**
+ * Who the field is captaining, and who is worth going against them with.
+ *
+ * FPL does not publish captaincy. `captainShare` is inferred from ownership and
+ * projected return, normalised across the pool — an estimate, and labelled as
+ * one everywhere it appears. What it is good for is RELATIVE: whether a pick is
+ * crowded or contrarian, not the exact percentage.
+ *
+ * A differential here is a player with a real chance of outscoring the popular
+ * captain while very few managers have the armband on him, which is the only
+ * kind of gamble that moves rank in your favour rather than sideways.
+ */
+export function captaincyBoard(ctx, opts = {}) {
+  const limit = opts.limit || 10;
+  const mine = new Set((ctx.squad || []).map((s) => s.id));
+
+  const pool = ctx.players
+    .filter((p) => p.avail > 0.1 && p.proj[0] > 0)
+    .map((p) => ({
+      player: p,
+      share: p.captainShare || 0,
+      proj: round(p.proj[0], 2),
+      doubled: round(p.proj[0] * 2, 2),
+      owned: p.owned,
+      eo: p.eo,
+      yours: mine.has(p.id),
+    }))
+    .sort((a, b) => b.share - a.share);
+
+  const popular = pool.slice(0, limit);
+  const top = popular[0] || null;
+
+  // Worth going against the crowd with: nearly as good, far less owned as a
+  // captain. The threshold is relative to the popular pick rather than absolute,
+  // because "differential" only means anything next to what everyone else did.
+  const differentials = pool
+    .filter((c) => top && c.share < top.share * 0.18 && c.proj >= top.proj * 0.82)
+    .sort((a, b) => b.proj - a.proj)
+    .slice(0, limit)
+    .map((c) => ({
+      ...c,
+      // what you gain on a manager who captained the popular pick, if both
+      // score their projection
+      edge: round(c.doubled - (top ? top.doubled : 0), 2),
+      rarity: top && top.share > 0 ? round(c.share / top.share, 3) : null,
+    }));
+
+  return {
+    popular, differentials, top,
+    // the share of managers concentrated on the top three armbands
+    concentration: round(pool.slice(0, 3).reduce((s, c) => s + c.share, 0), 1),
+    estimated: true,
   };
 }
