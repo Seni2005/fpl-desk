@@ -13,8 +13,14 @@ answer has a **Why?** that unfolds the evidence behind it.
 - **Matches** — every Premier League fixture in the round, grouped by calendar day **in Sydney time**, with kickoff times, live clocks and scores where they exist, difficulty colouring on both clubs, and a marker on every match involving one of your players.
 - **Team health** — a 0-100 composite across expected points, fixtures, minutes security, value, injury risk and bench strength, with the weakest component named.
 - **Decision / Analyst modes** — the same terminal at two densities. Decision answers the question in plain language with colour-coded badges (🔥 high goal threat, 🎯 chance creator, 🚑 flagged) that each print the number they came from. Analyst adds the full tables of xGI, xPts, fixture difficulty and simulated distributions, and unfolds every raw dump. Nothing is deleted in either direction. The switch sits in the sticky header and is remembered between visits.
-- **Planner** — plot transfers across the next six gameweeks, run a Plan A against a Plan B, and see which is worth more once hits are paid. A first visit opens a four-step walkthrough.
-- **The formation sandbox** — the planner's editing surface is a pitch. Pick a gameweek, tap any player to get a ranked list of affordable replacements, **or search the whole league by name or club** for someone specific. Watch the bank update as you stage moves. Play a **Wildcard, Free Hit, Triple Captain or Bench Boost** and the projection recalculates immediately: free transfers for the week, a tripled armband, or all fifteen counting. One of each chip, one week at a time.
+- **Planner** — plot transfers across the next six gameweeks, run a Plan A against a Plan B, and see which is worth more once hits are paid. A first visit opens a five-step walkthrough.
+- **The transfer screen** — the planner's editing surface is your squad on the left and the market on the right, side by side, because they are one decision. A counter strip along the top holds every number that constrains the next move: players selected, money in the bank, free transfers, transfers staged and the hit they cost. Tap a shirt and the market becomes his replacements; tap two shirts and they swap between the eleven and the bench; the **×** on a shirt sells him and leaves the slot empty. **Pitch or List**, whichever you want to read.
+- **Wildcard mode** — clear as many shirts as you like, or all fifteen at once, and fill them back from the market one at a time with the budget and the three-per-club rule checked against the squad actually on the pitch. **Fill empty slots** makes a first pass for you — the best legal squad the money reaches, never spending what the shirts still empty are going to need. It is a starting point, not a solved squad, and it says so.
+- **Search, filters and ranking** — the market searches every player in the league by surname or club, filters by position, maximum price, club, availability and fixture difficulty, and ranks by projected gain, next gameweek, form, total points, price, ownership, ICT index or the kindness of the run ahead. Nothing is hidden: a player you cannot have still appears, underneath, with the reason.
+- **Formations and the bench** — pick any legal shape from 3-4-3 to 5-4-1 and the eleven rearranges around the players you chose. Drag a shirt onto another or tap them in turn to swap. A move that would break the rules is refused by naming the rule — *"that would leave 2 defenders, you need at least three"* — never with a generic error.
+- **Chips** — play a **Wildcard, Free Hit, Triple Captain or Bench Boost** and the projection recalculates immediately: free transfers for the week, a tripled armband, or all fifteen counting. One of each chip, one week at a time.
+- **Team news** — every availability line FPL itself publishes, with the timestamp FPL put on it: injuries, bans, doubts with the percentage the game gives them, and the expected return date pulled out and set in bold. Yours first, worst first. Filterable to your own squad, to the ruled out, or to the doubts.
+- **Captaincy** — who the field is captaining and by how much, alongside the differential picks: near the same projection at a fraction of the ownership, with the points swing each one is worth against the popular choice.
 - **What changed** — price moves, availability, form and ownership swings since the previous refresh, with your own players marked.
 - **Your squad** on a pitch in your actual formation, with its own status line saying whether the round is updating, final, or not started, and how fresh the numbers are. Each card carries its gameweek score — the captain's doubled and shown with the working (`👑 24 pts` over `12 pts × 2`) — and **keeps it until the next deadline**, with the next three fixtures colour-coded underneath the whole time. Injury pins and price arrows throughout.
 - **Your leagues** — every mini-league you're in with your position and how it moved. Tap one for the table, your row highlighted.
@@ -264,11 +270,37 @@ Dark charcoal by default on every machine — deliberately not wired to your OS 
 
 The fixture difficulty ramp was generated in OKLCH at fixed lightness targets so brightness descends monotonically across the five tiers. That is the accessibility guarantee: under total colour loss the ramp still reads in the right **order**, which a hue-only scale cannot do. Verified against deuteranope, protanope and tritanope simulations, with every text pair clearing 4.5:1 — and each chip still prints its difficulty digit as a second encoding.
 
+## Building a wildcard squad
+
+Selling in FPL is atomic — you pick who goes out and who comes in together. A
+wildcard is not built that way. You empty several shirts, look at what the money
+now reaches, and fill them one at a time. So the transfer screen has a state the
+game itself does not: the **empty slot**.
+
+Tap the **×** on a shirt and he is sold. His fee lands in the bank, the shirt
+stays on the pitch as an empty outline in the line he played in, and the market
+retitles itself to *Fill the MID slot*. Nothing about that is a transfer yet, so
+it costs nothing and the transfer counter does not move; only putting someone in
+completes the move. Tap **↺** on an empty shirt to put him back.
+
+**Clear squad** does all fifteen at once, which is where a wildcard build
+actually starts. **Fill empty slots** then makes a first pass: the best legal
+squad the money reaches, filled one slot at a time and never spending what the
+remaining shirts will need, followed by a pass that puts whatever is left over
+into the single upgrade worth the most. A slot it cannot fill comes back named,
+with what is left in the bank, rather than being quietly dropped.
+
+Both the budget and the three-per-club rule are checked against **the squad on
+the pitch**, holes and all — not against the squad you started the week with.
+That distinction was a real bug once: the picker used to reason about the squad
+as it stood before the week's own moves, so a club you had just sold out of
+still counted against you, and the limit fired a player early with nothing on
+screen to explain it.
+
 ## Finding a specific player to bring in
 
-Tapping a player in the sandbox opens the picker. It leads with a ranked
-shortlist — same position, affordable, available, sorted by projected gain —
-which answers *who should I get*.
+The market beside the pitch leads with a ranked shortlist — same position,
+affordable, available — which answers *who should I get*.
 
 The search box answers the other question: *can I have him?* It reaches every
 player in the league, by surname or by club, and **nothing is filtered out**. A
@@ -284,6 +316,16 @@ back in three bands:
 
 Each blocked row keeps its name, price and projection and loses only its button,
 with a short chip saying why and the full sentence on hover.
+
+With nothing selected the market is just the market: it shows everyone, ranked
+however you asked, and blocks nobody on price — a figure you cannot afford for a
+slot you have not chosen is not a fact about the player. The money starts
+mattering the moment you point at a shirt.
+
+**Filters** sits beside the ranking menu and opens the fuller set — maximum
+price, club, availability and fixture difficulty over the next three gameweeks.
+Whatever is active shows as a chip under the position row and comes off with a
+click, so the list is never quietly narrower than you remember setting it.
 
 ## Chips in the planner
 
