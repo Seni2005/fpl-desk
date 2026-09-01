@@ -1015,3 +1015,273 @@ test('an empty or missing log is not an error', () => {
     assert.deepEqual(out.days, []);
   }
 });
+
+/* ══════════════ wildcard slots, lineups and the market filter ═════════════ */
+
+import {
+  slotOptions, finishMarket, MARKET_SORTS, fdrAhead,
+  arrangeXI, swapLineup, applyFormation, availableFormations,
+  xiCounts, shapeProblem, legalShape, formationName,
+} from '../js/engine.js';
+
+const squadIds = () => ctx.squad.map((s) => s.id);
+const P = (id) => ctx.byId.get(id);
+
+test('an empty slot banks the fee and leaves a hole on the pitch', () => {
+  const out = ctx.squad.find((s) => s.player.pos === 'MID').id;
+  const plan = { name: 'wc', weeks: [{ gw: ctx.gws[0], transfers: [{ out, in: null }] }] };
+  const res = evaluatePlan(plan, ctx);
+  const wk = res.weeks[0];
+  assert.equal(wk.holes.length, 1, 'one shirt is waiting');
+  assert.equal(wk.holes[0].pos, 'MID');
+  assert.equal(wk.squad.filter((id) => id == null).length, 1, 'the slot is genuinely empty');
+  assert.ok(!wk.squad.includes(out), 'the sold player has left the squad');
+  assert.ok(wk.bank > (ctx.entry.bank || 0), 'his fee is in the bank');
+  assert.equal(wk.hit, 0, 'an unfilled slot is not a transfer, so it cannot cost a hit');
+  assert.equal(wk.used, 0);
+  assert.ok(res.problems.some((t) => /empty slot/.test(t)), 'and the plan says so out loud');
+});
+
+test('several slots can be empty at once — this is what a wildcard looks like mid-build', () => {
+  const outs = ctx.squad.slice(0, 5).map((s) => s.id);
+  const plan = { name: 'wc', weeks: [{ gw: ctx.gws[0], chip: 'wildcard',
+    transfers: outs.map((id) => ({ out: id, in: null })) }] };
+  const res = evaluatePlan(plan, ctx);
+  assert.equal(res.weeks[0].holes.length, 5);
+  assert.equal(res.weeks[0].hit, 0);
+  const banked = outs.reduce((s, id) => s + P(id).price, ctx.entry.bank);
+  assert.ok(Math.abs(res.weeks[0].bank - banked) < 0.05, 'every fee is accounted for');
+});
+
+test('filling an empty slot spends the bank, not the bank plus a price', () => {
+  const out = ctx.squad.find((s) => s.player.pos === 'FWD');
+  const plan = { name: 'wc', weeks: [{ gw: ctx.gws[0], transfers: [{ out: out.id, in: null }] }] };
+  const wk = evaluatePlan(plan, ctx).weeks[0];
+  const rows = slotOptions('FWD', ctx, wk.bank, wk.squad);
+  assert.ok(rows.length, 'the market has forwards');
+  for (const r of rows.filter((x) => x.legal)) {
+    assert.ok(r.player.price <= wk.bank + 1e-9,
+      `${r.player.name} at £${r.player.price} must fit inside £${wk.bank}`);
+  }
+  const over = rows.find((r) => r.blocked === 'budget');
+  if (over) assert.match(over.blockedWhy, new RegExp(`£${wk.bank.toFixed(1)}m for this slot`));
+});
+
+test('the player you just sold can be bought back into his own empty slot', () => {
+  const out = ctx.squad.find((s) => s.player.pos === 'MID');
+  const plan = { name: 'wc', weeks: [{ gw: ctx.gws[0], transfers: [{ out: out.id, in: null }] }] };
+  const wk = evaluatePlan(plan, ctx).weeks[0];
+  const rows = slotOptions('MID', ctx, wk.bank, wk.squad);
+  const him = rows.find((r) => r.player.id === out.id);
+  assert.ok(him, 'he is in the market again');
+  assert.ok(him.legal, 'and buying him back is legal — you have his money');
+});
+
+test('the club limit counts the squad on the pitch, holes and all', () => {
+  const team = ctx.squad[0].player.team;
+  const mates = ctx.squad.filter((s) => s.player.team === team);
+  const rows = slotOptions(ctx.squad[0].player.pos, ctx, 100, squadIds());
+  const blocked = rows.filter((r) => r.player.team === team && r.blocked === 'club');
+  if (mates.length >= MAX_PER_CLUB) {
+    assert.ok(blocked.length, 'at the limit, the club is blocked');
+    assert.match(blocked[0].blockedWhy, /limit is 3/);
+  } else {
+    assert.equal(blocked.length, 0, 'under the limit, nothing from that club is blocked');
+  }
+});
+
+test('a manual eleven survives a transfer that does not touch it', () => {
+  const auto = optimalXI(ctx.squad.map((s) => s.player), 0);
+  const manual = { xi: auto.xi.map((p) => p.id), bench: auto.bench.map((p) => p.id) };
+  const benchMan = auto.bench.find((p) => p.pos !== 'GKP');
+  const players = ctx.squad.map((s) => s.player).filter((p) => p.id !== benchMan.id);
+  const kept = arrangeXI(players, 0, manual);
+  assert.equal(kept.manual, true);
+  assert.deepEqual(kept.xi.map((p) => p.id).sort(), manual.xi.slice().sort(),
+    'selling a substitute leaves the eleven exactly as it was');
+});
+
+test('a manual eleven is repaired, not discarded, when a starter is sold', () => {
+  const auto = optimalXI(ctx.squad.map((s) => s.player), 0);
+  const manual = { xi: auto.xi.map((p) => p.id), bench: auto.bench.map((p) => p.id) };
+  const gone = auto.xi.find((p) => p.pos === 'MID');
+  const players = ctx.squad.map((s) => s.player).filter((p) => p.id !== gone.id);
+  const fixed = arrangeXI(players, 0, manual);
+  assert.equal(fixed.xi.length, 11);
+  assert.equal(shapeProblem(xiCounts(fixed.xi)), null, 'still a legal shape');
+  assert.ok(!fixed.xi.some((p) => p.id === gone.id));
+  const survivors = manual.xi.filter((id) => id !== gone.id);
+  const stillThere = survivors.filter((id) => fixed.xi.some((p) => p.id === id));
+  assert.equal(stillThere.length, survivors.length, 'everyone else keeps his place');
+});
+
+test('swapping a bench player in and a starter out keeps the eleven legal', () => {
+  const arr = optimalXI(ctx.squad.map((s) => s.player), 0);
+  const sub = arr.bench.find((p) => p.pos !== 'GKP');
+  const starter = arr.xi.find((p) => p.pos === sub.pos);
+  const r = swapLineup(arr, starter.id, sub.id);
+  assert.equal(r.ok, true, r.error);
+  assert.ok(r.xi.includes(sub.id) && !r.xi.includes(starter.id));
+  assert.ok(r.bench.includes(starter.id));
+  assert.equal(r.xi.length, 11);
+});
+
+test('a swap that would break the shape is refused with the rule it breaks', () => {
+  const arr = optimalXI(ctx.squad.map((s) => s.player), 0);
+  const counts = xiCounts(arr.xi);
+  // find a position that is already at its minimum, and try to drop one more
+  const min = { DEF: 3, MID: 2, FWD: 1 };
+  const tight = ['DEF', 'MID', 'FWD'].find((k) => counts[k] === min[k]);
+  if (!tight) return;                       // this XI has slack everywhere
+  const starter = arr.xi.find((p) => p.pos === tight);
+  const sub = arr.bench.find((p) => p.pos !== tight && p.pos !== 'GKP');
+  if (!sub) return;
+  const r = swapLineup(arr, starter.id, sub.id);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /at least|most/, 'the message names the rule, not "invalid"');
+});
+
+test('a goalkeeper can only swap with the other goalkeeper', () => {
+  const arr = optimalXI(ctx.squad.map((s) => s.player), 0);
+  const gk = arr.xi.find((p) => p.pos === 'GKP');
+  const outfieldSub = arr.bench.find((p) => p.pos !== 'GKP');
+  const bad = swapLineup(arr, gk.id, outfieldSub.id);
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /goalkeeper/i);
+
+  const benchGk = arr.bench.find((p) => p.pos === 'GKP');
+  if (benchGk) {
+    const good = swapLineup(arr, gk.id, benchGk.id);
+    assert.equal(good.ok, true, good.error);
+    assert.ok(good.xi.includes(benchGk.id));
+    assert.equal(good.bench[0], gk.id, 'the reserve keeper stays in the first bench slot');
+  }
+});
+
+test('changing formation keeps as many starters as the new shape allows', () => {
+  const arr = optimalXI(ctx.squad.map((s) => s.player), 0);
+  const shapes = availableFormations(ctx.squad.map((s) => s.player));
+  assert.ok(shapes.length > 1, 'a full squad can field more than one shape');
+  const target = shapes.find((s) => s !== arr.formation);
+  const r = applyFormation(arr, target, 0);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.formation, target);
+  assert.equal(r.xi.length, 11);
+  const [d, m, f] = target.split('-').map(Number);
+  const byId = new Map([...arr.xi, ...arr.bench].map((p) => [p.id, p]));
+  const c = xiCounts(r.xi.map((id) => byId.get(id)));
+  assert.deepEqual([c.DEF, c.MID, c.FWD], [d, m, f]);
+  assert.equal(c.GKP, 1);
+});
+
+test('an impossible formation is refused by name, not by silence', () => {
+  const arr = optimalXI(ctx.squad.map((s) => s.player), 0);
+  assert.equal(applyFormation(arr, '6-2-2', 0).ok, false);
+  assert.match(applyFormation(arr, '6-2-2', 0).error, /not a legal formation/);
+});
+
+test('every legal shape passes and every illegal one names its rule', () => {
+  assert.equal(shapeProblem({ GKP: 1, DEF: 4, MID: 4, FWD: 2 }), null);
+  assert.equal(legalShape({ GKP: 1, DEF: 3, MID: 4, FWD: 3 }), true);
+  assert.match(shapeProblem({ GKP: 1, DEF: 2, MID: 5, FWD: 3 }), /at least three/);
+  assert.match(shapeProblem({ GKP: 1, DEF: 5, MID: 5, FWD: 0 }), /at least one forward/);
+  assert.match(shapeProblem({ GKP: 0, DEF: 5, MID: 4, FWD: 2 }), /need a goalkeeper/);
+  assert.match(shapeProblem({ GKP: 2, DEF: 4, MID: 3, FWD: 2 }), /Only one goalkeeper/);
+  assert.equal(formationName({ GKP: 1, DEF: 3, MID: 5, FWD: 2 }), '3-5-2');
+});
+
+test('the market filters on every axis the drawer offers', () => {
+  const all = slotOptions('MID', ctx, 100, []);
+  const cheap = finishMarket(all, { maxPrice: 6 });
+  assert.ok(cheap.length && cheap.every((r) => r.player.price <= 6));
+  const fit = finishMarket(all, { avail: 'fit' });
+  assert.ok(fit.every((r) => r.player.status === 'a'));
+  const one = ctx.teams.keys().next().value;
+  const club = finishMarket(all, { team: one });
+  assert.ok(club.every((r) => r.player.team === one));
+  const kind = finishMarket(all, { maxFdr: 3 });
+  assert.ok(kind.every((r) => fdrAhead(r.player, 3) <= 3 + 1e-9));
+  assert.ok(finishMarket(all, { legalOnly: true }).every((r) => r.legal));
+});
+
+test('every sort column ranks descending, and blocked rows stay underneath', () => {
+  const all = slotOptions('MID', ctx, 12, squadIds());
+  for (const s of MARKET_SORTS) {
+    const rows = finishMarket(all, { sort: s.key });
+    const legal = rows.filter((r) => r.legal);
+    for (let i = 1; i < legal.length; i++) {
+      assert.ok(s.of(legal[i - 1]) >= s.of(legal[i]) - 1e-9,
+        `${s.key} is not descending at row ${i}`);
+    }
+    const firstBlocked = rows.findIndex((r) => !r.legal);
+    const lastLegal = rows.map((r) => r.legal).lastIndexOf(true);
+    if (firstBlocked >= 0 && lastLegal >= 0) {
+      assert.ok(firstBlocked > lastLegal, `${s.key} floated a blocked row above a legal one`);
+    }
+  }
+});
+
+test('sorting by fixtures puts the kindest run first', () => {
+  const all = slotOptions('DEF', ctx, 100, []);
+  const rows = finishMarket(all, { sort: 'fix', legalOnly: true });
+  assert.ok(fdrAhead(rows[0].player, 3) <= fdrAhead(rows[rows.length - 1].player, 3) + 1e-9);
+});
+
+test('auto-fill builds a legal squad out of fifteen empty shirts', async () => {
+  const { fillSlots } = await import('../js/engine.js');
+  const holes = ctx.squad.map((s) => ({ out: s.id, pos: s.player.pos }));
+  const bank = ctx.squad.reduce((s, x) => s + x.player.price, ctx.entry.bank);
+  const r = fillSlots(ctx, [], holes, bank);
+  assert.equal(r.unfilled.length, 0, 'every slot found somebody');
+  assert.equal(r.fills.length, 15);
+  assert.ok(r.bank >= -1e-9, `it did not overspend (£${r.bank}m left)`);
+
+  const shape = { GKP: 0, DEF: 0, MID: 0, FWD: 0 };
+  const clubs = {};
+  r.fills.forEach((f) => { shape[f.player.pos] += 1; clubs[f.player.team] = (clubs[f.player.team] || 0) + 1; });
+  assert.deepEqual(shape, SQUAD_SHAPE, 'the positions come out right');
+  assert.ok(Object.values(clubs).every((n) => n <= MAX_PER_CLUB), 'and nobody breaks the club limit');
+  assert.equal(new Set(r.fills.map((f) => f.player.id)).size, 15, 'nobody is picked twice');
+});
+
+test('auto-fill reserves money for the slots it has not reached yet', async () => {
+  const { fillSlots } = await import('../js/engine.js');
+  const holes = [{ pos: 'FWD' }, { pos: 'FWD' }, { pos: 'GKP' }];
+  // Exactly enough money for the three cheapest — nothing to spare anywhere.
+  const cheapest = (pos, k) => ctx.players
+    .filter((p) => p.pos === pos && p.status === 'a')
+    .map((p) => p.price).sort((a, b) => a - b).slice(0, k).reduce((s, v) => s + v, 0);
+  const tight = cheapest('FWD', 2) + cheapest('GKP', 1);
+
+  const r = fillSlots(ctx, [], holes, tight);
+  assert.equal(r.unfilled.length, 0,
+    'the first forward did not eat the money the other two slots needed');
+  assert.ok(r.bank >= -1e-9, `it did not overspend (£${r.bank}m left)`);
+
+  const broke = fillSlots(ctx, [], holes, tight - 0.5);
+  assert.ok(broke.unfilled.length > 0, 'half a million short and it says which slot missed out');
+});
+
+test('auto-fill says which slots it could not fill rather than dropping them', async () => {
+  const { fillSlots } = await import('../js/engine.js');
+  const r = fillSlots(ctx, [], [{ pos: 'FWD' }, { pos: 'FWD' }], 0.1);
+  assert.ok(r.unfilled.length > 0, 'no money means no players, and it says so');
+});
+
+test('the upgrade pass spends what is left without breaking anything', async () => {
+  const { fillSlots } = await import('../js/engine.js');
+  const holes = ctx.squad.map((s) => ({ out: s.id, pos: s.player.pos }));
+  const bank = ctx.squad.reduce((s, x) => s + x.player.price, ctx.entry.bank);
+  const plain = fillSlots(ctx, [], holes, bank, { upgrade: false });
+  const better = fillSlots(ctx, [], holes, bank);
+
+  const worth = (r) => r.fills.reduce((s, f) => s + f.player.scores.overall, 0);
+  assert.ok(worth(better) >= worth(plain) - 1e-9, 'upgrading never makes the squad worse');
+  assert.ok(better.bank <= plain.bank + 1e-9, 'and it never leaves more money behind');
+  assert.ok(better.bank >= -1e-9, `still inside the budget (£${better.bank}m)`);
+
+  const clubs = {};
+  better.fills.forEach((f) => { clubs[f.player.team] = (clubs[f.player.team] || 0) + 1; });
+  assert.ok(Object.values(clubs).every((n) => n <= MAX_PER_CLUB), 'and still legal on clubs');
+  assert.equal(new Set(better.fills.map((f) => f.player.id)).size, better.fills.length, 'and nobody duplicated');
+});
