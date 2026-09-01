@@ -7,11 +7,14 @@
 
 import {
   buildContext, weeklyAdvice, teamHealth, optimalXI, captainRanking,
-  transferAlternatives, replacementOptions, evaluatePlan, categorise, fixtureSwings,
+  replacementOptions, evaluatePlan, categorise, fixtureSwings,
   ownershipOpportunity, templateDiff, simulatePlayer,
   gameweekState, playerTraits, CHIPS, matchSchedule, selectEntry, priceChanges,
-  FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB,
-} from './engine.js?v=12';
+  playerMatchState, newsFeed, captaincyBoard,
+  slotOptions, finishMarket, MARKET_SORTS, fdrAhead, fillSlots,
+  arrangeXI, swapLineup, applyFormation, availableFormations, xiCounts, formationName,
+  FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB, SQUAD_SHAPE,
+} from './engine.js?v=13';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -38,6 +41,16 @@ let CTX = null, CHANGES = null, PRICELOG = null, DETAILS = {}, TEAM = new Map();
 let GW = null;
 /** Which gameweek the visual sandbox is currently editing. */
 let SB_GW = null;
+/**
+ * What the transfer screen is pointed at, and what the market list is therefore
+ * offering. One of:
+ *   null                        browsing — the market is just the market
+ *   {kind:'player', id}         a shirt on the pitch, so the list replaces him
+ *   {kind:'slot', out, pos}     an empty shirt, so the list fills it
+ */
+let SB_SEL = null;
+/** The last thing a refused swap or a filled slot had to say. Cleared on redraw. */
+let SB_MSG = '';
 
 /* ───────────────────────────── prefs ────────────────────────────────── */
 
@@ -46,6 +59,8 @@ const DEFAULTS = {
   pos: 'ALL', sort: 'overall', dir: -1, maxPrice: 16, hideFlag: true, hideOwned: false, q: '',
   pDir: 'all', pQ: '', pMine: false, pOwned: true, pSort: 'ratio', pDirn: -1,
   activePlan: 'A', plans: null, lastSeen: null,
+  sbView: 'pitch',
+  mk: { q: '', pos: 'all', team: '', maxPrice: null, avail: 'all', maxFdr: null, sort: 'gain' },
 };
 function loadPrefs() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('fpldesk.prefs') || '{}') }; } catch { return { ...DEFAULTS }; } }
 function savePrefs() { try { localStorage.setItem('fpldesk.prefs', JSON.stringify(prefs)); } catch {} }
@@ -498,12 +513,67 @@ function renderPlanner() {
   $('#planReset').disabled = res.weeks.every((w) => !w.transfers.length && !w.chip);
 }
 
-/* ══════════ EPIC 4 — visual sandbox, chips and onboarding ═══════════ */
+/* ══════════════ the transfer screen — pitch beside the market ══════════════ */
+
+/** The week being edited, as the evaluator sees it. */
+function sbWeek(evaluated) {
+  return evaluated.weeks.find((w) => w.gw === SB_GW) || null;
+}
+
+/** The plan's own record for the week being edited, created on demand. */
+function sbStep(create) {
+  const plan = getPlans()[prefs.activePlan];
+  let wk = (plan.weeks || []).find((w) => w.gw === SB_GW);
+  if (!wk && create) {
+    wk = { gw: SB_GW, transfers: [] };
+    plan.weeks.push(wk);
+    plan.weeks.sort((a, b) => a.gw - b.gw);
+  }
+  return wk || null;
+}
+
+/** Stage a sale, leaving the shirt empty. */
+function sellPlayer(id) {
+  const wk = sbStep(true);
+  // Selling someone you had just bought this week undoes that purchase rather
+  // than stacking a second move on top of it — otherwise the transfer count
+  // climbs while the squad goes back to where it started.
+  const bought = wk.transfers.find((t) => t.in === id);
+  if (bought) { bought.in = null; }
+  else if (!wk.transfers.some((t) => t.out === id)) wk.transfers.push({ out: id, in: null });
+  SB_SEL = { kind: 'slot', out: bought ? bought.out : id, pos: (CTX.byId.get(id) || {}).pos };
+  savePrefs(); renderPlanner();
+}
+
+/** Put a player into an empty shirt, or swap one out for him. */
+function buyInto(sel, inId) {
+  const wk = sbStep(true);
+  if (sel.kind === 'slot') {
+    const hole = wk.transfers.find((t) => t.out === sel.out && t.in == null);
+    if (hole) hole.in = inId;
+    else wk.transfers.push({ out: sel.out, in: inId });
+  } else {
+    wk.transfers = wk.transfers.filter((t) => t.out !== sel.id);
+    wk.transfers.push({ out: sel.id, in: inId });
+  }
+  // A completed move needs no further attention; drop the selection so the
+  // market goes back to browsing rather than hovering over a filled slot.
+  SB_SEL = null;
+  savePrefs(); renderPlanner();
+}
+
+/** Remember a lineup the user arranged by hand, for this week only. */
+function saveLineup(xi, bench) {
+  const wk = sbStep(true);
+  wk.xi = xi; wk.bench = bench;
+  savePrefs();
+}
 
 /**
- * The pitch you can experiment on. It shows the squad as it would stand in the
- * selected gameweek, including anything already staged, and tapping a player
- * opens the replacement list for that week. The bank above updates as you go.
+ * The transfer screen. The pitch on the left is the squad as it would stand in
+ * the gameweek being edited; the market on the right is what can go into it.
+ * They are two halves of one decision, so they sit side by side rather than one
+ * behind a dialog.
  */
 function renderSandbox(evaluated) {
   const box = $('#sandbox');
@@ -513,48 +583,105 @@ function renderSandbox(evaluated) {
   const plan = getPlans()[prefs.activePlan];
   if (SB_GW == null || !CTX.gws.includes(SB_GW)) SB_GW = CTX.gws[0];
   const idx = CTX.gws.indexOf(SB_GW);
-  const week = evaluated.weeks.find((w) => w.gw === SB_GW);
+  const week = sbWeek(evaluated);
+  const step = (plan.weeks || []).find((w) => w.gw === SB_GW) || null;
 
+  const holes = week ? week.holes : [];
+  const bank = week ? week.bank : (CTX.entry ? CTX.entry.bank : 0);
+  const squadIds = week ? week.squad.filter((id) => id != null) : CTX.squad.map((s) => s.id);
+  const players = squadIds.map((id) => CTX.byId.get(id)).filter(Boolean);
+
+  // Anything the picker points at must still exist. A stale selection survives
+  // a transfer otherwise, and the list starts offering replacements for a
+  // player who is no longer in the squad.
+  if (SB_SEL) {
+    if (SB_SEL.kind === 'player' && !squadIds.includes(SB_SEL.id)) SB_SEL = null;
+    if (SB_SEL.kind === 'slot' && !holes.some((h) => h.out === SB_SEL.out)) SB_SEL = null;
+  }
+
+  /* ── the bar: which week, what it costs, what shape ── */
   $('#sbGws').innerHTML = CTX.gws.map((g) => {
     const wk = (plan.weeks || []).find((w) => w.gw === g);
-    const moves = wk && wk.transfers ? wk.transfers.length : 0;
+    const moves = wk && wk.transfers ? wk.transfers.filter((t) => t.in != null).length : 0;
     return `<button data-sbgw="${g}" aria-pressed="${g === SB_GW}"` +
       `${wk && wk.chip ? ' class="haschip"' : ''} title="GW${g}${moves ? ` · ${moves} transfer${moves === 1 ? '' : 's'}` : ''}">GW${g}</button>`;
   }).join('');
 
-  const bank = week ? week.bank : (CTX.entry ? CTX.entry.bank : 0);
-  $('#sbBank').textContent = `£${bank.toFixed(1)}m`;
-  $('#sbBank').className = bank < 0 ? 'd' : bank > 0 ? 'u' : '';
+  const filled = 15 - holes.length;
+  const free = week && week.unlimited ? '∞' : week ? week.free : prefs.freeTransfers;
+  const count = (lab, val, cls, tip) =>
+    `<div class="tx-count${cls ? ' ' + cls : ''}"${tip ? ` title="${esc(tip)}"` : ''}>` +
+    `<span class="lab">${esc(lab)}</span><b>${val}</b></div>`;
+  $('#sbCounts').innerHTML =
+    count('Players', `${filled}<small>/15</small>`, filled < 15 ? 'warn' : '',
+      holes.length ? `${holes.length} shirt${holes.length === 1 ? '' : 's'} still empty` : 'A full squad') +
+    count('In the bank', `£${bank.toFixed(1)}<small>m</small>`, bank < 0 ? 'bad' : '',
+      bank < 0 ? 'Over budget — this plan cannot be made' : 'Money left after the staged moves') +
+    count('Free transfers', free, '', week && week.unlimited ? 'A chip makes this week unlimited' : 'Free moves this week before a hit') +
+    count('Transfers', week ? week.used : 0, week && week.hit ? 'bad' : '',
+      week && week.hit ? `${week.used} moves — ${week.hit} points of hits` : 'Moves staged this week') +
+    (week && week.hit ? count('Hit', `−${week.hit}`, 'bad', 'Points this week costs you') : '');
 
+  const shapes = availableFormations(players);
+  const shape = week && week.xi.length === 11
+    ? formationName(xiCounts(week.xi.map((id) => CTX.byId.get(id)).filter(Boolean)))
+    : null;
+  $('#sbFormation').innerHTML = shapes.map((s) =>
+    `<option value="${s}"${s === shape ? ' selected' : ''}>${s}</option>`).join('') ||
+    '<option value="">—</option>';
+  $('#sbFormation').disabled = !shape || shapes.length < 2;
+
+  $$('#sbView [data-sbview]').forEach((b) =>
+    b.setAttribute('aria-pressed', String(b.dataset.sbview === prefs.sbView)));
+
+  /* ── the squad, as a pitch or as a list ── */
   const staged = new Set();
-  const wkNow = (plan.weeks || []).find((w) => w.gw === SB_GW);
-  if (wkNow) wkNow.transfers.forEach((t) => staged.add(t.in));
+  if (step) step.transfers.forEach((t) => { if (t.in != null) staged.add(t.in); });
 
-  const players = (week ? week.squad : CTX.squad.map((s) => s.id)).map((id) => CTX.byId.get(id)).filter(Boolean);
-  const best = optimalXI(players, idx);
-  const lines = { GKP: [], DEF: [], MID: [], FWD: [] };
-  if (best) best.xi.forEach((p) => lines[p.pos].push(p));
-
-  const opts = (p) => ({ swappable: true, staged: staged.has(p.id), gw: SB_GW, projIdx: idx });
-  let html = `<div class="pitch"><span class="shape">${best ? best.formation : ''}</span>`;
-  ['GKP', 'DEF', 'MID', 'FWD'].forEach((pos) => {
-    if (lines[pos].length) html += `<div class="line">${lines[pos].map((p) => manCard(p, null, opts(p))).join('')}</div>`;
+  const cardOpts = (p) => ({
+    swappable: true, sellable: true, price: true, gw: SB_GW, projIdx: idx,
+    staged: staged.has(p.id),
+    selected: SB_SEL && SB_SEL.kind === 'player' && SB_SEL.id === p.id,
   });
-  html += '</div><div class="bench"><span class="lab">Bench</span><div class="line">' +
-    (best ? best.bench.map((p) => manCard(p, null, opts(p))).join('') : '') + '</div></div>';
-  $('#sbPitch').innerHTML = html;
 
-  const moves = wkNow && wkNow.transfers ? wkNow.transfers.length : 0;
-  $('#sbHint').innerHTML =
-    `Tap any player to swap him out of your GW${SB_GW} squad. ` +
-    (moves ? `<b>${moves} transfer${moves === 1 ? '' : 's'} staged.</b> ` : '') +
-    `<button class="linkbtn" id="coachOpen">How this works</button>`;
+  if (prefs.sbView === 'list') {
+    $('#sbPitch').innerHTML = squadList(week, holes, idx, staged);
+  } else {
+    const xi = (week ? week.xi : []).map((id) => CTX.byId.get(id)).filter(Boolean);
+    const bench = (week ? week.bench : []).map((id) => CTX.byId.get(id)).filter(Boolean);
+    const lines = { GKP: [], DEF: [], MID: [], FWD: [] };
+    xi.forEach((p) => lines[p.pos].push(manCard(p, null, cardOpts(p))));
+    // An empty shirt sits in the line it belongs to, so the gap is where the
+    // gap is rather than in a footnote.
+    holes.forEach((h) => { if (lines[h.pos]) lines[h.pos].push(emptyCard(h)); });
 
-  // chips: one of each, and only in one gameweek
+    let html = `<div class="pitch"><span class="shape">${esc(shape || `${filled}/15`)}</span>`;
+    ['GKP', 'DEF', 'MID', 'FWD'].forEach((pos) => {
+      if (lines[pos].length) html += `<div class="line">${lines[pos].join('')}</div>`;
+    });
+    html += '</div><div class="bench"><span class="lab">Bench</span><div class="line">' +
+      (bench.length ? bench.map((p) => manCard(p, null, cardOpts(p))).join('')
+        : '<span class="note">nobody on the bench yet</span>') + '</div></div>';
+    $('#sbPitch').innerHTML = html;
+  }
+
+  /* ── what to do next, in one line ── */
+  const moves = step ? step.transfers.filter((t) => t.in != null).length : 0;
+  $('#sbHint').innerHTML = SB_MSG
+    ? `<span class="sb-warn">${esc(SB_MSG)}</span>`
+    : SB_SEL && SB_SEL.kind === 'slot'
+      ? `An empty ${esc(SB_SEL.pos)} shirt is selected. Pick anyone from the market to fill it.`
+      : SB_SEL
+        ? `${esc((CTX.byId.get(SB_SEL.id) || {}).name || '')} is selected. Pick a replacement, or tap a team-mate to swap them round.`
+        : `Tap a shirt to select it, <b>×</b> to sell, or tap two players to swap them between the eleven and the bench.` +
+          (moves ? ` <b>${moves} transfer${moves === 1 ? '' : 's'} staged.</b>` : '');
+  SB_MSG = '';
+
+  /* ── chips: one of each, and only in one gameweek ── */
   const usedElsewhere = {};
   (plan.weeks || []).forEach((w) => { if (w.chip && w.gw !== SB_GW) usedElsewhere[w.chip] = w.gw; });
   $('#sbChips').innerHTML = Object.values(CHIPS).map((c) => {
-    const on = wkNow && wkNow.chip === c.key;
+    const on = step && step.chip === c.key;
     const blockedIn = usedElsewhere[c.key];
     return `<button class="chip" data-chip="${c.key}" aria-pressed="${on}"` +
       `${blockedIn ? ' disabled' : ''} title="${esc(c.blurb)}">` +
@@ -562,28 +689,434 @@ function renderSandbox(evaluated) {
       (blockedIn ? `<small>GW${blockedIn}</small>` : on ? '<small>on</small>' : '') + '</button>';
   }).join('');
 
+  $('#sbFill').hidden = !holes.length;
+  $('#sbFill').textContent = `Fill ${holes.length} empty ${holes.length === 1 ? 'slot' : 'slots'}`;
+  $('#sbUndo').disabled = !step || (!step.transfers.length && !step.chip && !step.xi);
+
+  renderMarket(week, holes, bank, squadIds, idx);
+  wireSandbox(week, holes, players, idx);
+}
+
+/** The same fifteen as a table, for when you want the numbers rather than the shape. */
+function squadList(week, holes, idx, staged) {
+  const rowsFor = (ids, tag) => ids.map((id) => {
+    const p = CTX.byId.get(id);
+    if (!p) return '';
+    const t = TEAM.get(p.team) || {};
+    const sel = SB_SEL && SB_SEL.kind === 'player' && SB_SEL.id === p.id;
+    const fx = p.fixtures[0];
+    return `<tr class="${sel ? 'sel ' : ''}${staged.has(p.id) ? 'staged' : ''}" data-row="${p.id}">` +
+      `<td class="l"><span class="badge">${esc(t.short || '')}</span>` +
+      `<button class="who lk" data-pick="${p.id}">${esc(p.name)}</button>` +
+      `<span class="tag">${esc(p.pos)}</span>${tag}${statusTag(p)}</td>` +
+      `<td class="num">${(p.proj[idx] || 0).toFixed(1)}</td>` +
+      `<td class="num">${(Number(p.form) || 0).toFixed(1)}</td>` +
+      `<td class="num">£${p.price.toFixed(1)}</td>` +
+      `<td class="num">${(p.owned || 0).toFixed(1)}%</td>` +
+      `<td class="l fxc">${gwChip(fx)}</td>` +
+      `<td class="r"><button class="btn tiny" data-sell="${p.id}" title="Sell ${esc(p.name)}">Sell</button></td></tr>`;
+  }).join('');
+
+  const holeRows = holes.map((h) =>
+    `<tr class="hole" data-hole="${h.out}"><td class="l" colspan="6">` +
+    `<span class="tag">${esc(h.pos)}</span> empty — ${esc(h.name)} sold for £${h.price.toFixed(1)}m</td>` +
+    `<td class="r"><button class="btn tiny go" data-slot="${h.out}">Fill</button></td></tr>`).join('');
+
+  return '<div class="tw"><table class="st sqlist"><thead><tr>' +
+    '<th class="l">Player</th><th>xPts</th><th>Form</th><th>Price</th><th>Own</th>' +
+    '<th class="l">Next</th><th></th></tr></thead><tbody>' +
+    rowsFor(week ? week.xi : [], '') +
+    (week && week.bench.length ? '<tr class="grp"><td colspan="7" class="l">Bench</td></tr>' : '') +
+    rowsFor(week ? week.bench : [], '') +
+    (holeRows ? '<tr class="grp"><td colspan="7" class="l">Empty slots</td></tr>' + holeRows : '') +
+    '</tbody></table></div>';
+}
+
+/** An empty shirt: the position it needs and the money it freed. */
+function emptyCard(h) {
+  const sel = SB_SEL && SB_SEL.kind === 'slot' && SB_SEL.out === h.out;
+  const label = `Empty ${h.pos} slot — ${h.name} sold for £${h.price.toFixed(1)}m. Pick a replacement.`;
+  return '<div class="manwrap">' +
+    `<button class="man empty${sel ? ' sel' : ''}" data-slot="${h.out}" ` +
+    `title="${esc(label)}" aria-label="${esc(label)}">` +
+    `<span class="ghost">+</span><span class="nm">${esc(h.pos)}</span>` +
+    `<span class="sc slot">£${h.price.toFixed(1)}<small> free</small></span></button>` +
+    `<button class="man-x undo" data-unsell="${h.out}" title="Put ${esc(h.name)} back">↺</button>` +
+    '</div>';
+}
+
+/* ─────────────────────────── the market pane ────────────────────────────── */
+
+const MK_POS = ['all', 'GKP', 'DEF', 'MID', 'FWD'];
+
+/** The filters that are doing something right now, as short chips. */
+function mkActive() {
+  const f = prefs.mk, out = [];
+  if (f.team) { const t = TEAM.get(Number(f.team)); if (t) out.push({ k: 'team', t: t.short || t.name }); }
+  if (f.maxPrice != null) out.push({ k: 'maxPrice', t: `≤ £${Number(f.maxPrice).toFixed(1)}m` });
+  if (f.avail === 'fit') out.push({ k: 'avail', t: 'fit only' });
+  else if (f.avail === 'flagged') out.push({ k: 'avail', t: 'flagged only' });
+  if (f.maxFdr != null) out.push({ k: 'maxFdr', t: `FDR ≤ ${f.maxFdr}` });
+  return out;
+}
+
+function renderMarket(week, holes, bank, squadIds, idx) {
+  const f = prefs.mk;
+  let rows, ceiling, title, sub, fixedPos = null;
+
+  if (SB_SEL && SB_SEL.kind === 'slot') {
+    fixedPos = SB_SEL.pos;
+    ceiling = bank;
+    rows = slotOptions(fixedPos, CTX, bank, squadIds, { query: f.q });
+    title = `Fill the ${fixedPos} slot`;
+    // The whole bank IS available for this slot — but not if the other empty
+    // shirts are going to be filled too, and saying only the first half of that
+    // invites you to spend the lot on a goalkeeper.
+    const others = holes.length - 1;
+    sub = `£${ceiling.toFixed(1)}m available` +
+      (others > 0 ? ` · ${others} more shirt${others === 1 ? '' : 's'} to fill after this` : '');
+  } else if (SB_SEL && SB_SEL.kind === 'player') {
+    const out = CTX.byId.get(SB_SEL.id);
+    fixedPos = out.pos;
+    ceiling = bank + out.price;
+    rows = replacementOptions(out, CTX, bank, squadIds, { query: f.q });
+    title = `Replace ${out.name}`;
+    sub = `£${ceiling.toFixed(1)}m available`;
+  } else {
+    // Nothing is selected, so nothing is being bought — and a price you cannot
+    // afford for a slot you have not chosen is not a fact about the player.
+    // Browsing shows the market whole; the money starts mattering the moment
+    // you point at a shirt.
+    ceiling = null;
+    rows = slotOptions(f.pos, CTX, 1e6, squadIds, { query: f.q });
+    title = 'Market';
+    sub = holes.length
+      ? `${holes.length} shirt${holes.length === 1 ? '' : 's'} to fill — tap one to point this list at it`
+      : 'Tap a shirt on the pitch to see who could replace him';
+  }
+
+  // The position is not a choice once a slot is selected — the slot decides it.
+  const shown = finishMarket(rows, { ...f, pos: fixedPos ? 'all' : f.pos }, f.q ? 60 : 40);
+
+  $('#mkTitle').textContent = title;
+  $('#mkSub').textContent = sub;
+  $('#mkClear').hidden = !SB_SEL;
+  $('#mkPos').hidden = !!fixedPos;
+  $('#mkPos').innerHTML = MK_POS.map((p) =>
+    `<button data-mkpos="${p}" aria-pressed="${p === f.pos}">${p === 'all' ? 'All' : p}</button>`).join('');
+  $('#mkSort').innerHTML = MARKET_SORTS.map((s) =>
+    `<option value="${s.key}"${s.key === f.sort ? ' selected' : ''}>${esc(s.label)}</option>`).join('');
+  $('#mkQ').placeholder = fixedPos ? `Search ${fixedPos}s and clubs…` : 'Search any player or club…';
+  $('#mkQClear').hidden = !f.q;
+
+  const chips = mkActive();
+  $('#mkChips').innerHTML = chips.length
+    ? chips.map((c) => `<button class="fchip" data-mkoff="${c.k}" title="Remove this filter">` +
+        `${esc(c.t)}<i>×</i></button>`).join('') +
+      '<button class="linkbtn" data-mkoff="all">clear all</button>'
+    : '';
+
+  const legal = shown.filter((r) => r.legal).length;
+  $('#mkNote').textContent = !shown.length ? ''
+    : ceiling == null ? `${shown.length} shown · browsing, nothing selected`
+    : `${shown.length} shown · ${legal} you can make now`;
+
+  if (!shown.length) {
+    $('#mkList').innerHTML = `<p class="note">${f.q
+      ? `No player matches “${esc(f.q)}” under these filters.`
+      : 'Nothing matches these filters. Widen the price or the club.'}</p>`;
+  } else {
+    $('#mkList').innerHTML = '<ul class="plist">' + bandedRows(shown, idx) + '</ul>';
+  }
+}
+
+/**
+ * Three bands with a header on each, so the eye has somewhere to stop. A flat
+ * list of forty rows where only the first two are usable reads as noise; the
+ * same rows under "you can't have these" read as an answer.
+ */
+const MK_BANDS = [
+  { of: (r) => r.legal, lab: (n) => `${n} you can make now` },
+  { of: (r) => !r.legal && r.fixable, lab: (n) => `${n} blocked by money or the club limit` },
+  { of: (r) => !r.legal && !r.fixable, lab: (n) => `${n} the rules won't allow` },
+];
+
+function bandedRows(rows, idx) {
+  const groups = MK_BANDS.map((b) => ({ b, rows: rows.filter(b.of) })).filter((g) => g.rows.length);
+  return groups.map((g) =>
+    (groups.length > 1 ? `<li class="grp"><span class="lab">${esc(g.b.lab(g.rows.length))}</span></li>` : '') +
+    g.rows.map((r) => mkRow(r, idx)).join('')).join('');
+}
+
+/**
+ * One row of the market. A blocked player is rendered exactly like a legal one
+ * except the button is disabled and the reason replaces the pitch — so
+ * searching for someone always answers "can I have him?", never leaves you
+ * wondering whether the search is broken.
+ */
+function mkRow(r, idx) {
+  const p = r.player;
+  const t = TEAM.get(p.team) || {};
+  const proj = (p.proj && p.proj[idx]) || 0;
+  // Two lines, not one. The pane is 380px at its widest, and a single row that
+  // has to hold a name, a club, a reason, three numbers and a button either
+  // truncates the name or pushes the button off the edge.
+  return `<li class="alt${r.legal ? '' : ' blocked'}">` +
+    '<span class="alt-top">' +
+      `<span class="badge">${esc(t.short || '')}</span>` +
+      `<button class="who lk" data-pick="${p.id}">${esc(p.name)}</button>` +
+      `<span class="alt-pos">${esc(p.pos)}</span>${statusTag(p)}` +
+      `<span class="num alt-price">£${p.price.toFixed(1)}</span>` +
+    '</span>' +
+    '<span class="alt-bot">' +
+      (r.legal
+        ? `<span class="alt-why">${esc(r.reason)}</span>`
+        : `<span class="tag block" title="${esc(r.blockedWhy)}">${esc(r.blockedText)}</span>`) +
+      '<span class="rt">' +
+        `<span class="mk-fx" title="Next fixture">${gwChip(p.fixtures[0])}</span>` +
+        `<span class="num" title="Projected points for this gameweek">${proj.toFixed(1)}<small> xP</small></span>` +
+        (SB_SEL
+          ? (r.legal
+            ? `<button class="btn go" data-buy="${p.id}">In</button>`
+            : `<button class="btn" disabled title="${esc(r.blockedWhy)}">—</button>`)
+          : `<button class="btn" data-pick="${p.id}" title="Open ${esc(p.name)}">Info</button>`) +
+      '</span>' +
+    '</span></li>';
+}
+
+/* ───────────────────────────── wiring ──────────────────────────────────── */
+
+function wireSandbox(week, holes, players, idx) {
+  const redraw = () => renderPlanner();
+
   $$('#sbGws [data-sbgw]').forEach((b) => b.addEventListener('click', () => {
-    SB_GW = Number(b.dataset.sbgw); renderPlanner();
+    SB_GW = Number(b.dataset.sbgw); SB_SEL = null; redraw();
   }));
-  $$('#sbPitch [data-swapout]').forEach((b) => b.addEventListener('click', () => {
-    openReplacements(Number(b.dataset.swapout), SB_GW);
+  $$('#sbView [data-sbview]').forEach((b) => b.addEventListener('click', () => {
+    prefs.sbView = b.dataset.sbview; savePrefs(); redraw();
   }));
+  $('#sbFormation').onchange = (e) => {
+    const arr = { xi: (week ? week.xi : []).map((id) => CTX.byId.get(id)).filter(Boolean),
+      bench: (week ? week.bench : []).map((id) => CTX.byId.get(id)).filter(Boolean) };
+    const r = applyFormation(arr, e.target.value, idx);
+    if (!r.ok) { SB_MSG = r.error; redraw(); return; }
+    saveLineup(r.xi, r.bench); redraw();
+  };
+
+  /* selecting, selling and swapping on the pitch */
+  const pick = (id) => {
+    if (SB_SEL && SB_SEL.kind === 'player' && SB_SEL.id !== id) {
+      // Two shirts in a row means a lineup swap, which is the common intent.
+      // If the rules will not allow it, say which rule — and move the selection
+      // rather than leaving the user tapping at a dead card.
+      const arr = { xi: week.xi.map((x) => CTX.byId.get(x)).filter(Boolean),
+        bench: week.bench.map((x) => CTX.byId.get(x)).filter(Boolean) };
+      const r = swapLineup(arr, SB_SEL.id, id);
+      if (r.ok) { saveLineup(r.xi, r.bench); SB_SEL = null; redraw(); return; }
+      SB_MSG = r.error;
+    }
+    SB_SEL = SB_SEL && SB_SEL.kind === 'player' && SB_SEL.id === id
+      ? null : { kind: 'player', id };
+    redraw();
+  };
+
+  $$('#sbPitch [data-swapout]').forEach((b) => b.addEventListener('click', () => pick(Number(b.dataset.swapout))));
+  $$('#sbPitch [data-row]').forEach((tr) => tr.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    pick(Number(tr.dataset.row));
+  }));
+  $$('#sbPitch [data-sell]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation(); sellPlayer(Number(b.dataset.sell));
+  }));
+  $$('#sbPitch [data-slot]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const out = Number(b.dataset.slot);
+    const h = holes.find((x) => x.out === out);
+    SB_SEL = SB_SEL && SB_SEL.kind === 'slot' && SB_SEL.out === out
+      ? null : { kind: 'slot', out, pos: h ? h.pos : null };
+    redraw();
+  }));
+  $$('#sbPitch [data-unsell]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const out = Number(b.dataset.unsell);
+    const wk = sbStep(false);
+    if (wk) wk.transfers = wk.transfers.filter((t) => !(t.out === out && t.in == null));
+    SB_SEL = null; savePrefs(); redraw();
+  }));
+
+  /* drag and drop, for anyone who would rather drag than tap */
+  $$('#sbPitch .man[draggable="true"]').forEach((el) => {
+    el.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', el.dataset.swapout);
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', () => el.classList.remove('dragging'));
+    el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('dragover'); });
+    el.addEventListener('dragleave', () => el.classList.remove('dragover'));
+    el.addEventListener('drop', (e) => {
+      e.preventDefault(); el.classList.remove('dragover');
+      const from = Number(e.dataTransfer.getData('text/plain'));
+      const to = Number(el.dataset.swapout);
+      if (!from || !to || from === to) return;
+      const arr = { xi: week.xi.map((x) => CTX.byId.get(x)).filter(Boolean),
+        bench: week.bench.map((x) => CTX.byId.get(x)).filter(Boolean) };
+      const r = swapLineup(arr, from, to);
+      if (!r.ok) { SB_MSG = r.error; redraw(); return; }
+      saveLineup(r.xi, r.bench); SB_SEL = null; redraw();
+    });
+  });
+
+  /* chips */
   $$('#sbChips [data-chip]').forEach((b) => b.addEventListener('click', () => {
-    const key = b.dataset.chip;
-    const pl = getPlans()[prefs.activePlan];
-    let wk = pl.weeks.find((w) => w.gw === SB_GW);
-    if (!wk) { wk = { gw: SB_GW, transfers: [] }; pl.weeks.push(wk); pl.weeks.sort((x, y) => x.gw - y.gw); }
-    wk.chip = wk.chip === key ? null : key;
-    savePrefs(); renderPlanner();
+    const wk = sbStep(true);
+    wk.chip = wk.chip === b.dataset.chip ? null : b.dataset.chip;
+    savePrefs(); redraw();
   }));
+
+  /* the action bar */
+  $('#sbAuto').onclick = () => {
+    const wk = sbStep(true);
+    delete wk.xi; delete wk.bench;
+    SB_MSG = 'Eleven picked by projected points.';
+    savePrefs(); redraw();
+  };
+  $('#sbClear').onclick = () => {
+    const wk = sbStep(true);
+    const ids = week ? week.squad.filter((id) => id != null) : CTX.squad.map((s) => s.id);
+    // Emptying the squad is what a wildcard build starts with, so it clears
+    // every shirt at once rather than fifteen taps on fifteen crosses.
+    ids.forEach((id) => {
+      const bought = wk.transfers.find((t) => t.in === id);
+      if (bought) bought.in = null;
+      else if (!wk.transfers.some((t) => t.out === id)) wk.transfers.push({ out: id, in: null });
+    });
+    delete wk.xi; delete wk.bench;
+    SB_SEL = null;
+    SB_MSG = wk.chip === 'wildcard' || wk.chip === 'freehit'
+      ? 'Squad cleared. Fifteen shirts to fill.'
+      : 'Squad cleared — play a Wildcard or Free Hit in this week, or those moves cost hits.';
+    savePrefs(); redraw();
+  };
+  $('#sbFill').onclick = () => {
+    const ids = week ? week.squad.filter((id) => id != null) : [];
+    const r = fillSlots(CTX, ids, holes, week ? week.bank : 0);
+    const wk = sbStep(true);
+    r.fills.forEach((fl) => {
+      const hole = wk.transfers.find((t) => t.out === fl.out && t.in == null);
+      if (hole) hole.in = fl.player.id;
+    });
+    SB_SEL = null;
+    SB_MSG = r.unfilled.length
+      ? `Filled ${r.fills.length}. No ${r.unfilled.map((h) => h.pos).join('/')} fits what is left — £${r.bank.toFixed(1)}m in the bank.`
+      : `Filled ${r.fills.length} slot${r.fills.length === 1 ? '' : 's'}, £${r.bank.toFixed(1)}m left. A starting point, not a finished squad.`;
+    savePrefs(); redraw();
+  };
+  $('#sbUndo').onclick = () => {
+    const plan = getPlans()[prefs.activePlan];
+    plan.weeks = (plan.weeks || []).filter((w) => w.gw !== SB_GW);
+    SB_SEL = null; savePrefs(); redraw();
+  };
   const co = $('#coachOpen');
-  if (co) co.addEventListener('click', () => openCoach(0));
+  if (co) co.onclick = () => openCoach(0);
+
+  /* the market pane */
+  $$('#mkPos [data-mkpos]').forEach((b) => b.addEventListener('click', () => {
+    prefs.mk.pos = b.dataset.mkpos; savePrefs(); redraw();
+  }));
+  $('#mkSort').onchange = (e) => { prefs.mk.sort = e.target.value; savePrefs(); redraw(); };
+  $('#mkClear').onclick = () => { SB_SEL = null; redraw(); };
+  $('#mkFilters').onclick = () => openFilters();
+  $$('#mkChips [data-mkoff]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.mkoff === 'all') prefs.mk = { ...DEFAULTS.mk, q: prefs.mk.q, pos: prefs.mk.pos, sort: prefs.mk.sort };
+    else prefs.mk[b.dataset.mkoff] = b.dataset.mkoff === 'avail' ? 'all' : null;
+    savePrefs(); redraw();
+  }));
+  $$('#mkList [data-buy]').forEach((b) => b.addEventListener('click', () => {
+    if (SB_SEL) buyInto(SB_SEL, Number(b.dataset.buy));
+  }));
+  $$('#sandbox [data-pick]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation(); openPlayer(Number(b.dataset.pick));
+  }));
+
+  // Only the list is redrawn on a keystroke, never the input — rebuilding the
+  // field would drop focus and the caret on every letter.
+  const q = $('#mkQ');
+  let t = null;
+  q.oninput = () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      prefs.mk.q = q.value; savePrefs();
+      const keep = document.activeElement === q;
+      redraw();
+      if (keep) { const n = $('#mkQ'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+    }, 120);
+  };
+  q.onkeydown = (e) => {
+    if (e.key === 'Escape' && q.value) { e.stopPropagation(); q.value = ''; q.oninput(); }
+  };
+  $('#mkQClear').onclick = () => { prefs.mk.q = ''; savePrefs(); redraw(); };
+}
+
+/**
+ * The full filter set, in a drawer — price, club, availability and fixture
+ * difficulty. These are the ones you set once and forget, so they live behind a
+ * button rather than eating the width the player list needs.
+ */
+function openFilters() {
+  const f = prefs.mk;
+  const clubs = [...TEAM.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const maxP = Math.ceil(Math.max(...CTX.players.map((p) => p.price)));
+  openDrawer({
+    title: 'Filter the market',
+    meta: 'Applies to the list beside the pitch',
+    body: '<div class="blk fset">' +
+      `<label><span class="lab">Maximum price</span>` +
+        `<input type="range" id="fPrice" min="3.5" max="${maxP}" step="0.1" value="${f.maxPrice == null ? maxP : f.maxPrice}">` +
+        `<output id="fPriceOut">${f.maxPrice == null ? 'any' : '£' + Number(f.maxPrice).toFixed(1) + 'm'}</output></label>` +
+      '<label><span class="lab">Club</span><select id="fTeam"><option value="">Every club</option>' +
+        clubs.map((t) => `<option value="${t.id}"${String(f.team) === String(t.id) ? ' selected' : ''}>${esc(t.name)}</option>`).join('') +
+      '</select></label>' +
+      '<label><span class="lab">Availability</span><select id="fAvail">' +
+        [['all', 'Everyone'], ['fit', 'Fit and available'], ['flagged', 'Flagged only']]
+          .map(([v, l]) => `<option value="${v}"${f.avail === v ? ' selected' : ''}>${l}</option>`).join('') +
+      '</select></label>' +
+      '<label><span class="lab">Fixture difficulty, next three</span><select id="fFdr">' +
+        [['', 'Any run'], ['2', 'Very easy (≤ 2.0)'], ['2.5', 'Easy (≤ 2.5)'], ['3', 'Even or better (≤ 3.0)'], ['3.5', 'Not brutal (≤ 3.5)']]
+          .map(([v, l]) => `<option value="${v}"${String(f.maxFdr == null ? '' : f.maxFdr) === v ? ' selected' : ''}>${l}</option>`).join('') +
+      '</select></label>' +
+      '<label><span class="lab">Rank by</span><select id="fSort">' +
+        MARKET_SORTS.map((s) => `<option value="${s.key}"${s.key === f.sort ? ' selected' : ''}>${esc(s.label)}</option>`).join('') +
+      '</select></label>' +
+      '<p class="note">Players you cannot have stay in the list, underneath, with the reason. ' +
+      'A filter that hides them would answer “why isn’t he here?” with silence.</p>' +
+      '<div class="fset-act"><button class="btn" id="fReset">Reset filters</button>' +
+      '<button class="btn go" id="fApply">Show results</button></div>' +
+    '</div>',
+  });
+  const price = $('#fPrice');
+  price.oninput = () => {
+    $('#fPriceOut').textContent = Number(price.value) >= maxP ? 'any' : `£${Number(price.value).toFixed(1)}m`;
+  };
+  $('#fReset').onclick = () => {
+    prefs.mk = { ...DEFAULTS.mk, q: prefs.mk.q, pos: prefs.mk.pos };
+    savePrefs(); closeDrawer(); renderPlanner();
+  };
+  $('#fApply').onclick = () => {
+    prefs.mk.maxPrice = Number(price.value) >= maxP ? null : Number(price.value);
+    prefs.mk.team = $('#fTeam').value || '';
+    prefs.mk.avail = $('#fAvail').value;
+    prefs.mk.maxFdr = $('#fFdr').value === '' ? null : Number($('#fFdr').value);
+    prefs.mk.sort = $('#fSort').value;
+    savePrefs(); closeDrawer(); renderPlanner();
+  };
 }
 
 /* ── guided walkthrough ── */
 const COACH = [
   { t: 'Try transfers without committing', b: 'The planner is a sandbox. Nothing here touches your real team — it works out what a set of moves would be worth so you can compare before you commit.' },
-  { t: 'Pick a gameweek, then tap a player', b: 'Choose the gameweek you want to edit, then tap anyone on the pitch. You will get a ranked list of replacements you can actually afford, each with the reason it beat the others. The bank above updates as you stage moves.' },
+  { t: 'Tap a shirt, and the market answers', b: 'Choose the gameweek, then tap anyone on the pitch. The list on the right becomes his replacements — ranked, each with the reason it beat the others, and anyone you cannot have still shown with the reason why. The counters along the top move as you stage.' },
+  { t: 'Two taps swap, the cross sells', b: 'Tap two players to swap them between the eleven and the bench; the Shape menu changes formation and keeps who it can. The × on a shirt sells him and leaves the slot empty, which is how a wildcard build starts — clear as many as you like, then fill them from the market or let Fill empty slots make a first pass.' },
   { t: 'Play a chip and watch it recalculate', b: 'Wildcard and Free Hit make a week of transfers free. Triple Captain scores your armband three times instead of twice. Bench Boost counts all fifteen players. Projections update immediately.' },
   { t: 'Run two plans against each other', b: 'Plan A and Plan B are independent. Build a different route in each, and the difference at the top tells you which is worth more once hits are paid.' },
 ];
@@ -607,142 +1140,6 @@ function maybeCoach() {
   let seen = null;
   try { seen = localStorage.getItem('fpldesk.coached'); } catch (e) { seen = '1'; }
   if (!seen && CTX.squad.length) openCoach(0);
-}
-
-/**
- * Squad state at the START of a gameweek, before that week's own moves.
- *
- * Only a fallback now, for a gameweek the plan evaluator did not return.
- * Anything checking the FPL rules must use the week's own `squad` from
- * `evaluatePlan`, which is what the pitch renders — see openReplacements.
- */
-function squadAtGw(plan, gw) {
-  let squad = CTX.squad.map((s) => s.id);
-  (plan.weeks || []).filter((w) => w.gw < gw).forEach((w) => {
-    (w.transfers || []).forEach((t) => { squad = squad.map((id) => (id === t.out ? t.in : id)); });
-  });
-  return squad;
-}
-
-/** Ranked replacements with the reason each one beat the rest. */
-function openReplacements(outId, gw) {
-  const plan = getPlans()[prefs.activePlan];
-  const out = CTX.byId.get(outId);
-  const evalNow = evaluatePlan(plan, CTX, { freeTransfers: 1, startingFree: prefs.freeTransfers });
-  const wk = evalNow.weeks.find((w) => w.gw === gw);
-  const bank = wk ? wk.bank : (CTX.entry ? CTX.entry.bank : 0);
-
-  /* The squad the picker reasons about must be the squad on the pitch.
-   *
-   * It used to rebuild its own from `squadAtGw`, which applies only the weeks
-   * STRICTLY BEFORE this one — so the moment you staged a transfer in the week
-   * you were editing, the two disagreed by exactly that move. A club you had
-   * just moved away from still counted, and the three-per-club rule fired a
-   * player early with nothing on screen to explain it. `wk.squad` is what the
-   * pitch renders, so it is what the rules are checked against. */
-  const squadIds = wk ? wk.squad : squadAtGw(plan, gw);
-  const ceiling = bank + out.price;
-
-  /**
-   * One row. A blocked player is rendered exactly like a legal one except the
-   * button is disabled and the reason replaces the pitch — so searching for
-   * someone always answers "can I have him?", never leaves you wondering
-   * whether the search is broken.
-   */
-  const row = (a) => {
-    const p = a.player;
-    const t = TEAM.get(p.team) || {};
-    return `<li class="alt${a.legal ? '' : ' blocked'}">` +
-      `<span class="badge">${esc(t.short || '')}</span>` +
-      `<span class="who" data-pid="${p.id}">${esc(p.name)}</span>${statusTag(p)}` +
-      (a.legal
-        ? `<span class="alt-why">${esc(a.reason)}</span>`
-        : `<span class="tag block" title="${esc(a.blockedWhy)}">${esc(a.blockedText)}</span>`) +
-      `<span class="rt"><span class="num ${a.gain > 0 ? 'u' : 'd'}">${signed(a.gain, 2)}/GW</span>` +
-      `<span class="num">£${p.price.toFixed(1)}</span>` +
-      (a.legal
-        ? `<button class="btn go" data-buy="${p.id}|${outId}|${gw}">In</button>`
-        : `<button class="btn" disabled title="${esc(a.blockedWhy)}">—</button>`) +
-      '</span></li>';
-  };
-
-  /**
-   * Three bands with a header on each, so the eye has somewhere to stop.
-   * A flat list of forty rows where only the first two are usable reads as
-   * noise; the same rows under "you can't have these" read as an answer.
-   */
-  const BANDS = [
-    { of: (r) => r.legal, lab: (n) => `${n} you can make now` },
-    { of: (r) => !r.legal && r.fixable, lab: (n) => `${n} blocked by money or the club limit` },
-    { of: (r) => !r.legal && !r.fixable, lab: (n) => `${n} the rules won't allow` },
-  ];
-
-  const listFor = (q) => {
-    const rows = replacementOptions(out, CTX, bank, squadIds, { query: q, limit: q ? 40 : 12 });
-    if (!rows.length) {
-      return q
-        ? `<p class="note">No player matches “${esc(q)}”. Try a surname or a club.</p>`
-        : '<p class="note">Nothing in this position fits the budget. Search to see who is out of reach and by how much.</p>';
-    }
-    if (!q) {
-      return '<span class="lab">' + rows.length + ' options ranked by projected gain</span>' +
-        '<ul class="plist">' + rows.map(row).join('') + '</ul>';
-    }
-    const groups = BANDS.map((bnd) => ({ bnd, rows: rows.filter(bnd.of) })).filter((g) => g.rows.length);
-    // the per-band headers already say how many you can make, so the top line
-    // only carries the total — repeating it reads as two different numbers
-    return `<span class="lab">${rows.length} match${rows.length === 1 ? '' : 'es'} ` +
-      `for “${esc(q)}”</span><ul class="plist">` +
-      groups.map((g) =>
-        `<li class="grp"><span class="lab">${esc(g.bnd.lab(g.rows.length))}</span></li>` +
-        g.rows.map(row).join('')).join('') +
-      '</ul>';
-  };
-
-  openDrawer({
-    title: `Replace ${out.name}`,
-    meta: `GW${gw} · £${ceiling.toFixed(1)}m available`,
-    body: '<div class="blk">' +
-      '<div class="altsearch">' +
-        `<input type="search" id="altQ" autocomplete="off" spellcheck="false"` +
-        ` placeholder="Search any player or club…" aria-label="Search for a replacement">` +
-        `<button class="linkbtn" id="altClear" hidden>clear</button>` +
-      '</div>' +
-      `<div id="altList">${listFor('')}</div>` +
-    '</div>',
-  });
-
-  const wireRows = () => {
-    $$('#dBody [data-buy]').forEach((b) => b.addEventListener('click', () => {
-      const [inId, oId, g] = b.dataset.buy.split('|').map(Number);
-      const pl = getPlans()[prefs.activePlan];
-      let week = pl.weeks.find((w) => w.gw === g);
-      if (!week) { week = { gw: g, transfers: [] }; pl.weeks.push(week); }
-      week.transfers = week.transfers.filter((t) => t.out !== oId);
-      week.transfers.push({ out: oId, in: inId });
-      pl.weeks.sort((a, b2) => a.gw - b2.gw);
-      savePrefs(); closeDrawer(); renderPlanner();
-    }));
-  };
-  wireRows();
-
-  // Only the list is re-rendered, never the input — rebuilding the field would
-  // drop focus and the caret on every keystroke.
-  const q = $('#altQ');
-  const clear = $('#altClear');
-  let t = null;
-  const run = () => {
-    const v = q.value;
-    clear.hidden = !v;
-    $('#altList').innerHTML = listFor(v);
-    wireRows();
-  };
-  q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 90); });
-  q.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && q.value) { e.stopPropagation(); q.value = ''; run(); }
-  });
-  clear.addEventListener('click', () => { q.value = ''; run(); q.focus(); });
-  q.focus();
 }
 
 /* ═══════════════════ existing sections, engine-backed ════════════════ */
@@ -787,12 +1184,26 @@ function manCard(p, pick, opts = {}) {
     plate = `<span class="sc proj" title="Projected points for GW${opts.gw}">` +
       `${xp.toFixed(1)}<small> xPts</small></span>`;
   } else if (scored) {
-    const base = p.gwPts || 0;
-    const cls = 'sc' + (mult > 1 ? ' dbl' : '') + (phase === 'settled' ? ' fin' : '');
-    const title = `GW${GW.scoresGw} ${phase === 'settled' ? 'final' : 'so far'}` +
-      (mult > 1 ? ` — ${base} × ${mult}` : '');
-    plate = `<span class="${cls}" title="${esc(title)}">${base * mult}<small> pts</small>` +
-      (mult > 1 ? `<span class="mult">${base} pts × ${mult}</span>` : '') + '</span>';
+    const ms = playerMatchState(p, CTX, GW);
+    if (!ms.counts) {
+      // He has not scored nil — he has not played. Showing 0 here is the most
+      // misread number on a live page, so the plate carries the state instead
+      // and the kickoff time answers the obvious next question.
+      const ko = ms.kickoff
+        ? new Date(ms.kickoff).toLocaleString('en-AU',
+            { timeZone: TZ, weekday: 'short', hour: 'numeric', minute: '2-digit' })
+        : null;
+      plate = `<span class="sc yet" title="${esc(ms.label + (ko ? ` — kicks off ${ko} Sydney` : ''))}">` +
+        `${esc(ms.label)}</span>`;
+    } else {
+      const base = p.gwPts || 0;
+      const cls = 'sc' + (mult > 1 ? ' dbl' : '') + (phase === 'settled' ? ' fin' : '') +
+        (ms.state === 'playing' ? ' live' : '');
+      const title = `GW${GW.scoresGw} ${phase === 'settled' ? 'final' : ms.state === 'playing' ? 'live' : 'so far'}` +
+        (mult > 1 ? ` — ${base} × ${mult}` : '');
+      plate = `<span class="${cls}" title="${esc(title)}">${base * mult}<small> pts</small>` +
+        (mult > 1 ? `<span class="mult">${base} pts × ${mult}</span>` : '') + '</span>';
+    }
   } else {
     const nf = p.fixtures[0];
     if (nf && !nf.blank) {
@@ -809,15 +1220,24 @@ function manCard(p, pick, opts = {}) {
   let chips = '';
   for (let i = 0; i < 3; i++) chips += gwChip(p.fixtures[i]);
 
-  const cls = 'man' + (opts.swappable ? ' swappable' : '') + (opts.staged ? ' staged' : '');
+  const cls = 'man' + (opts.swappable ? ' swappable' : '') + (opts.staged ? ' staged' : '') +
+    (opts.selected ? ' sel' : '');
   const label = opts.swappable
-    ? `Swap ${p.full} out of your GW${opts.gw} squad`
+    ? `${p.full} · £${p.price.toFixed(1)}m. Select to replace him, or to swap him with a team-mate.`
     : `${p.full} · ${p.pts} points this season`;
-  return `<button class="${cls}" ${opts.swappable ? `data-swapout="${p.id}"` : `data-pid="${p.id}"`} ` +
-    `title="${esc(label)}" aria-label="${esc(label)}">` +
+  const card = `<button class="${cls}" ${opts.swappable ? `data-swapout="${p.id}" draggable="true"` : `data-pid="${p.id}"`} ` +
+    `title="${esc(label)}" aria-label="${esc(label)}"${opts.selected ? ' aria-pressed="true"' : ''}>` +
     (pins ? `<span class="pins">${pins}</span>` : '') + armband + kit(p.team, 46) +
     `<span class="nm">${esc(p.name)}</span>${plate}` +
+    (opts.price ? `<span class="pr">£${p.price.toFixed(1)}</span>` : '') +
     `<span class="fixrow">${chips}</span></button>`;
+
+  // The cross has to be its own control — a button inside a button is not
+  // markup a browser will honour, and selling is a different act from selecting.
+  if (!opts.sellable) return card;
+  return '<div class="manwrap">' + card +
+    `<button class="man-x" data-sell="${p.id}" title="Sell ${esc(p.name)} for £${p.price.toFixed(1)}m" ` +
+    `aria-label="Sell ${esc(p.full)}">×</button></div>`;
 }
 
 /**
@@ -832,7 +1252,8 @@ function squadStatus() {
       label: `GW${GW.scoresGw} updating · ${GW.inPlay ? `${GW.inPlay} in play` : `${GW.started}/${GW.total} played`}` };
   }
   if (GW.phase === 'settled') {
-    return { tone: 'done', dot: '', label: `GW${GW.scoresGw} final · all ${GW.total} played` };
+    return { tone: 'done', dot: '',
+      label: `Gameweek ${GW.scoresGw} finished · all ${GW.total} played` };
   }
   return { tone: 'idle', dot: '', label: `GW${GW.targetGw} not started · showing fixtures` };
 }
@@ -1789,6 +2210,117 @@ function renderPriceLog() {
   $$('#plBody .who').forEach((el) => el.addEventListener('click', () => openPlayer(Number(el.dataset.pid))));
 }
 
+/* ══════════════════════════ team news ══════════════════════════ */
+
+let NF_FILTER = 'all';
+
+const STATUS_WORD = { i: 'Injured', s: 'Suspended', u: 'Unavailable', n: 'Not in squad', d: 'Doubtful' };
+
+function renderNewsFeed() {
+  const sec = $('#newsfeed');
+  const feed = newsFeed(CTX, { limit: 80 });
+  if (!feed.total) { sec.hidden = true; return; }
+  sec.hidden = false;
+
+  const keep = (i) => NF_FILTER === 'all' ? true
+    : NF_FILTER === 'mine' ? i.yours
+    : NF_FILTER === 'out' ? (i.status === 'i' || i.status === 'u' || i.status === 'n')
+    : i.status === 'd';
+
+  $$('#nfSeg [data-nf]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.nf === NF_FILTER)));
+  $('#nfNote').textContent =
+    `${feed.total} flagged · ${feed.out} out, ${feed.doubt} doubtful, ${feed.suspended} suspended` +
+    (feed.yours ? ` · ${feed.yours} of yours` : '');
+
+  const rows = feed.items.filter(keep);
+  if (!rows.length) {
+    $('#nfBody').innerHTML = '<p class="note">Nothing matches that filter.</p>';
+  } else {
+    $('#nfBody').innerHTML = rows.map((i) => {
+      const when = i.at
+        ? new Date(i.at).toLocaleString('en-AU',
+            { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+        : null;
+      const sev = i.status === 'd' ? 'warn' : i.status === 's' ? 'susp' : 'bad';
+      return `<article class="nf-item${i.yours ? ' mine' : ''}">` +
+        `<span class="nf-sev ${sev}" title="${esc(STATUS_WORD[i.status] || i.status)}"></span>` +
+        '<div class="nf-main">' +
+          '<div class="nf-top">' +
+            `<span class="badge">${esc(i.club)}</span>` +
+            `<span class="who" data-pid="${i.id}">${esc(i.full || i.name)}</span>` +
+            `<span class="nf-pos">${esc(i.pos)}</span>` +
+            (i.yours ? '<span class="tag mine">yours</span>' : '') +
+            // The percentage is only information for a doubt. "Injured · 0%"
+            // is the same fact twice, and the second telling is the noisier one.
+            `<span class="tag block">${esc(STATUS_WORD[i.status] || i.status)}` +
+              (i.status === 'd' && i.chance != null ? ` · ${i.chance}%` : '') + '</span>' +
+          '</div>' +
+          `<p class="nf-text">${esc(i.headline)}` +
+            (i.back ? `<b> ${esc(i.back)}</b>` : '') + '</p>' +
+        '</div>' +
+        '<div class="nf-side">' +
+          (when ? `<span class="nf-when" title="Timestamped by FPL itself">${esc(when)}</span>` : '<span class="nf-when dim">no date given</span>') +
+          `<span class="num">£${i.price.toFixed(1)}</span>` +
+          `<span class="nf-own num">${i.owned.toFixed(1)}%</span>` +
+        '</div></article>';
+    }).join('');
+  }
+
+  $('#nfCaveat').textContent =
+    'Every line here is the text FPL publishes for that player, with the timestamp FPL put on it. ' +
+    'The game\u2019s API carries availability and nothing else — no transfers, no press conferences, no rumours — ' +
+    'so this feed reports what the game says rather than padding it with headlines from elsewhere.';
+
+  $$('#nfSeg [data-nf]').forEach((b) => b.addEventListener('click', () => {
+    NF_FILTER = b.dataset.nf; renderNewsFeed();
+  }));
+  $$('#nfBody .who').forEach((el) => el.addEventListener('click', () => openPlayer(Number(el.dataset.pid))));
+}
+
+/* ══════════════════════════ captaincy ══════════════════════════ */
+
+function renderCaptaincy() {
+  const sec = $('#captaincy');
+  const board = captaincyBoard(CTX, { limit: 8 });
+  if (!board.top) { sec.hidden = true; return; }
+  sec.hidden = false;
+
+  $('#capNote').textContent =
+    `${board.concentration}% of armbands on the top three · estimated`;
+
+  const bar = (share, max) => `<span class="cap-bar"><i style="width:${Math.max(2, (share / max) * 100).toFixed(1)}%"></i></span>`;
+  const max = board.popular[0] ? board.popular[0].share : 1;
+
+  $('#capPopular').innerHTML = board.popular.map((c) => {
+    const t = TEAM.get(c.player.team) || {};
+    return `<div class="cap-row${c.yours ? ' mine' : ''}">` +
+      `<span class="badge">${esc(t.short || '')}</span>` +
+      `<span class="who" data-pid="${c.player.id}">${esc(c.player.name)}</span>` +
+      bar(c.share, max) +
+      `<span class="num strong">${c.share.toFixed(1)}%</span>` +
+      `<span class="num dimtxt">${c.doubled.toFixed(1)} xPts</span></div>`;
+  }).join('');
+
+  $('#capDiff').innerHTML = board.differentials.length
+    ? board.differentials.map((c) => {
+      const t = TEAM.get(c.player.team) || {};
+      return `<div class="cap-row${c.yours ? ' mine' : ''}">` +
+        `<span class="badge">${esc(t.short || '')}</span>` +
+        `<span class="who" data-pid="${c.player.id}">${esc(c.player.name)}</span>` +
+        `<span class="cap-why">${c.share.toFixed(1)}% captained</span>` +
+        `<span class="num ${c.edge >= 0 ? 'u' : 'd'}">${signed(c.edge, 1)}</span>` +
+        `<span class="num dimtxt">${c.doubled.toFixed(1)} xPts</span></div>`;
+    }).join('')
+    : '<p class="note">Nobody is close enough to the popular pick to be worth the gamble this week.</p>';
+
+  $('#capCaveat').textContent =
+    'FPL does not publish captaincy, so these shares are estimated from ownership and projected return. ' +
+    'Read them as relative — whether a pick is crowded or contrarian — not as exact percentages. ' +
+    `The edge column is what you gain on someone who captained ${board.top.player.name}, if both score their projection.`;
+
+  $$('#captaincy .who').forEach((el) => el.addEventListener('click', () => openPlayer(Number(el.dataset.pid))));
+}
+
 /** Everything that depends on data or mode. Called on boot and on mode change. */
 function renderAll() {
   renderTeamTag();
@@ -1806,6 +2338,8 @@ function renderAll() {
   renderPrices();
   renderTargets();
   renderTicker();
+  renderNewsFeed();
+  renderCaptaincy();
   renderInjuries();
 }
 
