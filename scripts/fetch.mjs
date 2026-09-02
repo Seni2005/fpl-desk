@@ -474,6 +474,20 @@ function updateTimeline(prevTimeline, players, gw) {
  * how many managers own them. The exact threshold is not published, so this is
  * an estimate, not a guarantee — the dashboard labels it as such.
  */
+/**
+ * Net transfers as a share of the player's own owner base.
+ *
+ * This was once used to ESTIMATE progress toward a price change, and it was
+ * badly wrong — it treated a rise as "net transfers reach 7.5% of your current
+ * owners", which makes a differential look permanently about to rise and a
+ * template player permanently safe. Against FPL's own predictor it came out
+ * roughly ninety times too high on a low-owned player.
+ *
+ * FPL now publishes the real progress (`price_change_percent`), so nothing
+ * predicts from this any more. What survives is the honest part: the net
+ * transfers themselves and a coarse direction band, which are facts about
+ * transfer flow rather than a claim about a threshold nobody has published.
+ */
 function pricePressure(el, totalPlayers) {
   const owners = Math.max((num(el.selected_by_percent) / 100) * totalPlayers, 1);
   const net = (el.transfers_in_event || 0) - (el.transfers_out_event || 0);
@@ -688,6 +702,25 @@ async function main() {
       corners: el.corners_and_indirect_freekicks_order,
       tIn: el.transfers_in_event || 0,
       tOut: el.transfers_out_event || 0,
+
+      /* FPL's own price-change predictor, added to the game for 2026/27.
+       *
+       * This is the number the official site shows, published by the people who
+       * run the algorithm, so it is READ rather than estimated. Signed: positive
+       * is progress toward a rise, negative toward a fall, and 100 is the
+       * threshold. `pricePct` is now; `priceProj` is FPL's projection for
+       * tonight (offset 0), tomorrow and the night after, each with FPL's own
+       * likelihood rating. */
+      pricePct: el.price_change_percent == null ? null : num(el.price_change_percent),
+      priceRate: el.price_change_hourly_rate == null ? null : num(el.price_change_hourly_rate),
+      priceProj: Array.isArray(el.price_change_projections)
+        ? el.price_change_projections.map((x) => ({
+            d: x.offset,
+            pct: num(x.projected_percent),
+            like: x.likelihood == null ? null : Number(x.likelihood),
+          }))
+        : null,
+
       price_: pricePressure(el, totalPlayers),
       fdr5: fixtureScore(teamFix, fromEvent, 5),
       fdr3: fixtureScore(teamFix, fromEvent, 3),
