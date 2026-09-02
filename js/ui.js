@@ -12,9 +12,10 @@ import {
   gameweekState, playerTraits, CHIPS, matchSchedule, selectEntry, priceChanges,
   playerMatchState, newsFeed, captaincyBoard,
   slotOptions, finishMarket, MARKET_SORTS, fdrAhead, fillSlots,
+  seasonReview, setPieces, setPieceText, chipPlanner, adviceReview, leagueEdge,
   arrangeXI, swapLineup, applyFormation, availableFormations, xiCounts, formationName,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB, SQUAD_SHAPE,
-} from './engine.js?v=14';
+} from './engine.js?v=15';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -37,6 +38,8 @@ const ordinal = (n) => {
 };
 
 let CTX = null, CHANGES = null, PRICELOG = null, DETAILS = {}, TEAM = new Map();
+/** What was predicted before each deadline, and what actually happened. */
+let PREDICTIONS = null, TIMELINE = null;
 /** Lifecycle of the round, and which gameweek every recommendation targets. */
 let GW = null;
 /** Which gameweek the visual sandbox is currently editing. */
@@ -60,7 +63,7 @@ const DEFAULTS = {
   pDir: 'all', pQ: '', pMine: false, pOwned: true, pSort: 'ratio', pDirn: -1,
   activePlan: 'A', plans: null, lastSeen: null,
   sbView: 'pitch',
-  mk: { q: '', pos: 'all', team: '', maxPrice: null, avail: 'all', maxFdr: null, sort: 'gain' },
+  mk: { q: '', pos: 'all', team: '', maxPrice: null, avail: 'all', maxFdr: null, setPiece: null, sort: 'gain' },
 };
 function loadPrefs() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('fpldesk.prefs') || '{}') }; } catch { return { ...DEFAULTS }; } }
 function savePrefs() { try { localStorage.setItem('fpldesk.prefs', JSON.stringify(prefs)); } catch {} }
@@ -95,6 +98,15 @@ function statusTag(p) {
   if (p.status === 'd') return `<span class="tag doubt">${p.chance != null ? p.chance + '%' : 'doubt'}</span>`;
   return '<span class="tag out">out</span>';
 }
+/**
+ * The penalty chip. Only first choice earns one — second in line is a fact for
+ * the player panel, not a reason to pick him off a list.
+ */
+function penTag(p) {
+  if (p.pens !== 1) return '';
+  return `<span class="tag pen" title="${esc('Takes the penalties — ' + (setPieceText(p) || 'first choice'))}">PEN</span>`;
+}
+
 const CAT_LABEL = { buy: 'Buy', hold: 'Hold', monitor: 'Monitor', sell: 'Sell' };
 function catTag(p) {
   const c = categorise(p);
@@ -801,6 +813,8 @@ function mkActive() {
   if (f.maxPrice != null) out.push({ k: 'maxPrice', t: `≤ £${Number(f.maxPrice).toFixed(1)}m` });
   if (f.avail === 'fit') out.push({ k: 'avail', t: 'fit only' });
   else if (f.avail === 'flagged') out.push({ k: 'avail', t: 'flagged only' });
+  if (f.setPiece === 'pens') out.push({ k: 'setPiece', t: 'penalty takers' });
+  else if (f.setPiece === 'any') out.push({ k: 'setPiece', t: 'set-piece takers' });
   if (f.maxFdr != null) out.push({ k: 'maxFdr', t: `FDR ≤ ${f.maxFdr}` });
   return out;
 }
@@ -910,7 +924,7 @@ function mkRow(r, idx) {
     '<span class="alt-top">' +
       `<span class="badge">${esc(t.short || '')}</span>` +
       `<button class="who lk" data-pick="${p.id}">${esc(p.name)}</button>` +
-      `<span class="alt-pos">${esc(p.pos)}</span>${statusTag(p)}` +
+      `<span class="alt-pos">${esc(p.pos)}</span>${statusTag(p)}${penTag(p)}` +
       `<span class="num alt-price">£${p.price.toFixed(1)}</span>` +
     '</span>' +
     '<span class="alt-bot">' +
@@ -1122,6 +1136,10 @@ function openFilters() {
       '<label><span class="lab">Club</span><select id="fTeam"><option value="">Every club</option>' +
         clubs.map((t) => `<option value="${t.id}"${String(f.team) === String(t.id) ? ' selected' : ''}>${esc(t.name)}</option>`).join('') +
       '</select></label>' +
+      '<label><span class="lab">Set pieces</span><select id="fSetPiece">' +
+        [['', 'Anyone'], ['pens', 'Takes the penalties'], ['any', 'On any set-piece duty']]
+          .map(([v, l]) => `<option value="${v}"${(f.setPiece || '') === v ? ' selected' : ''}>${l}</option>`).join('') +
+      '</select></label>' +
       '<label><span class="lab">Availability</span><select id="fAvail">' +
         [['all', 'Everyone'], ['fit', 'Fit and available'], ['flagged', 'Flagged only']]
           .map(([v, l]) => `<option value="${v}"${f.avail === v ? ' selected' : ''}>${l}</option>`).join('') +
@@ -1151,6 +1169,7 @@ function openFilters() {
     prefs.mk.maxPrice = Number(price.value) >= maxP ? null : Number(price.value);
     prefs.mk.team = $('#fTeam').value || '';
     prefs.mk.avail = $('#fAvail').value;
+    prefs.mk.setPiece = $('#fSetPiece').value || null;
     prefs.mk.maxFdr = $('#fFdr').value === '' ? null : Number($('#fFdr').value);
     prefs.mk.sort = $('#fSort').value;
     savePrefs(); closeDrawer(); renderPlanner();
@@ -1364,6 +1383,473 @@ function renderSquad() {
   key.innerHTML = '<span>Fixture difficulty</span>' +
     [1, 2, 3, 4, 5].map((d) => `<span class="fx f${d}" title="${d} — ${FDR_WORD[d]}">${d}</span>`).join('') +
     '<span>easiest to hardest · UPPER CASE is home</span>';
+}
+
+/* ═══════════════════════════ your season ═══════════════════════════════ */
+
+/**
+ * The season so far.
+ *
+ * Two charts, deliberately separate: weekly points and overall rank are
+ * different measures on different scales, and putting them on one plot with two
+ * y-axes would invent a relationship between them. One axis each.
+ *
+ * The totals are stat tiles rather than a third chart, because "you have paid
+ * 24 points in hits" is a number, not a shape.
+ */
+function renderSeason() {
+  const sec = $('#season');
+  const s = seasonReview(CTX);
+  if (!s) { sec.hidden = true; return; }
+  sec.hidden = false;
+
+  $('#seasonNote').textContent =
+    `${s.played} round${s.played === 1 ? '' : 's'} played` +
+    (s.ratedWeeks ? ` · beat the FPL average in ${s.beat} of ${s.ratedWeeks}` : '');
+
+  const tile = (lab, val, sub, tone) =>
+    `<div class="tile${tone ? ' ' + tone : ''}"><span class="lab">${esc(lab)}</span>` +
+    `<b>${val}</b><span class="tsub">${esc(sub || '')}</span></div>`;
+
+  $('#seasonTiles').innerHTML =
+    tile('Points', s.points.toLocaleString(), `${s.mean} a week`) +
+    tile('Overall rank', s.rank == null ? '—' : compact(s.rank),
+      s.bestRank == null ? '' : `best ${compact(s.bestRank)}`) +
+    // The two figures no FPL surface puts in front of you.
+    tile('Paid in hits', s.hits ? `−${s.hits}` : '0',
+      s.hitCount ? `${s.hitCount} week${s.hitCount === 1 ? '' : 's'}` : 'none taken',
+      s.hits > 0 ? 'bad' : '') +
+    tile('Left on the bench', s.bench,
+      s.played ? `${(s.bench / s.played).toFixed(1)} a week` : '') +
+    tile('Squad value', s.value == null ? '—' : `£${s.value.toFixed(1)}`,
+      s.valueGain == null ? '' : `${signed(s.valueGain)}m since GW${s.weeks[0].gw}`,
+      s.valueGain > 0 ? 'good' : s.valueGain < 0 ? 'bad' : '') +
+    tile('Best week', s.best ? `${s.best.net}` : '—',
+      s.best ? `GW${s.best.gw}${s.worst && s.worst.gw !== s.best.gw ? ` · worst ${s.worst.net} in GW${s.worst.gw}` : ''}` : '');
+
+  if (s.played < 2) {
+    $('#seasonCharts').innerHTML =
+      '<p class="note">One round on the books. The curves start once a second has been scored.</p>';
+    // An empty bordered box is a rendering artefact, not a table.
+    $('#seasonTable').innerHTML = '';
+    $('#seasonTable').hidden = true;
+    return;
+  }
+  $('#seasonCharts').innerHTML = seasonPointsChart(s) + seasonRankChart(s);
+
+  $('#seasonTable').hidden = false;
+  $('#seasonTable').innerHTML =
+    '<table class="st"><thead><tr><th class="l">GW</th><th>Points</th><th>Hit</th>' +
+    '<th>Bench</th><th>Transfers</th><th>Average</th><th>Rank</th><th>Value</th></tr></thead><tbody>' +
+    s.weeks.slice().reverse().map((w) =>
+      `<tr><td class="l rk">GW${w.gw}</td>` +
+      `<td class="num">${w.net}</td>` +
+      `<td class="num${w.hit ? ' d' : ''}">${w.hit ? '−' + w.hit : '·'}</td>` +
+      `<td class="num">${w.bench}</td>` +
+      `<td class="num">${w.transfers}</td>` +
+      `<td class="num">${w.average == null ? '—' : w.average}</td>` +
+      `<td class="num">${w.rank == null ? '—' : compact(w.rank)}</td>` +
+      `<td class="num">${w.value == null ? '—' : '£' + w.value.toFixed(1)}</td></tr>`).join('') +
+    '</tbody></table>';
+}
+
+/**
+ * Weekly points as bars from zero, with the field's average drawn across them.
+ *
+ * The average is a reference line rather than a second series: comparing by
+ * position is the strongest read available, and it keeps the whole thing on one
+ * axis. Bars are square-ended because this design system has no radius anywhere.
+ */
+function seasonPointsChart(s) {
+  // The right margin is wide enough to park the reference-line label outside
+  // the plot. Sitting it inside meant it landed on whichever bar happened to be
+  // tallest that week.
+  const W = 900, H = 190, L = 40, R = 74, T = 16, B = 30;
+  const n = s.weeks.length;
+  const top = Math.max(...s.weeks.map((w) => Math.max(w.net, w.average || 0)));
+  const y1 = Math.max(10, Math.ceil((top * 1.12) / 10) * 10);
+  const band = (W - L - R) / n;
+  const bw = Math.min(30, band * 0.62);
+  const X = (i) => L + band * i + band / 2;
+  const Y = (v) => H - B - (v / y1) * (H - T - B);
+
+  const ticks = [];
+  for (let v = 0; v <= y1; v += y1 > 80 ? 40 : 20) ticks.push(v);
+
+  const bars = s.weeks.map((w, i) => {
+    const h = Math.max(1, Y(0) - Y(w.net));
+    const cmp = w.vsAverage == null ? ''
+      : `\n${w.vsAverage > 0 ? '+' : ''}${w.vsAverage} against the average of ${w.average}`;
+    return `<rect class="cbar" x="${(X(i) - bw / 2).toFixed(1)}" y="${Y(w.net).toFixed(1)}" ` +
+      `width="${bw.toFixed(1)}" height="${h.toFixed(1)}">` +
+      `<title>GW${w.gw} — ${w.net} points${w.hit ? ` (${w.gross} less a ${w.hit}-point hit)` : ''}` +
+      `${cmp}\n${w.bench} left on the bench</title></rect>`;
+  }).join('');
+
+  const rated = s.weeks.filter((w) => w.average != null);
+  let avg = '';
+  if (rated.length) {
+    // A stepped line: the field's average is a different number every week, and
+    // drawing it as a slope between weeks would imply a trend it does not have.
+    const pts = [];
+    s.weeks.forEach((w, i) => {
+      if (w.average == null) return;
+      pts.push(`${(X(i) - band / 2).toFixed(1)},${Y(w.average).toFixed(1)}`);
+      pts.push(`${(X(i) + band / 2).toFixed(1)},${Y(w.average).toFixed(1)}`);
+    });
+    const lastAvg = rated[rated.length - 1].average;
+    avg = `<polyline class="avgline" points="${pts.join(' ')}"/>` +
+      `<text class="medlab" x="${W - R + 6}" y="${Y(lastAvg) + 3.5}" text-anchor="start">` +
+      'FPL average</text>';
+  }
+
+  return '<figure class="chartbox">' +
+    '<figcaption class="lab">Points a week, against what the field managed</figcaption>' +
+    `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" aria-label="Bar chart of your points in each of ` +
+      `${n} gameweeks, with the FPL average drawn across it. ` +
+      (s.ratedWeeks ? `You beat the average in ${s.beat} of ${s.ratedWeeks}.` : '') + '">' +
+      ticks.map((v) => `<g><line class="grid" x1="${L}" y1="${Y(v)}" x2="${W - R}" y2="${Y(v)}"/>` +
+        `<text class="ax" x="${L - 7}" y="${Y(v) + 3.5}" text-anchor="end">${v}</text></g>`).join('') +
+      bars + avg +
+      s.weeks.map((w, i) => `<text class="ax" x="${X(i)}" y="${H - B + 15}" text-anchor="middle">${w.gw}</text>`).join('') +
+      `<text class="axlab" x="${(L + W - R) / 2}" y="${H - 3}" text-anchor="middle">Gameweek</text>` +
+    '</svg></figure>';
+}
+
+/** Overall rank, with the axis inverted so climbing the chart means climbing. */
+function seasonRankChart(s) {
+  const rows = s.weeks.filter((w) => w.rank != null);
+  if (rows.length < 2) return '';
+  const W = 900, H = 175, L = 52, R = 58, T = 16, B = 30;
+  const lo = Math.min(...rows.map((w) => w.rank)), hi = Math.max(...rows.map((w) => w.rank));
+  const pad = Math.max(1, (hi - lo) * 0.15);
+  const y0 = Math.max(1, lo - pad), y1 = hi + pad;
+  const band = (W - L - R) / s.weeks.length;
+  const X = (gw) => L + band * (s.weeks.findIndex((w) => w.gw === gw)) + band / 2;
+  // Inverted: rank 1 belongs at the top, because that is where first place is.
+  const Y = (v) => T + ((v - y0) / (y1 - y0)) * (H - T - B);
+
+  const ticks = [y0, (y0 + y1) / 2, y1];
+  const line = rows.map((w) => `${X(w.gw).toFixed(1)},${Y(w.rank).toFixed(1)}`).join(' ');
+  const dots = rows.map((w) =>
+    `<circle class="dot" cx="${X(w.gw).toFixed(1)}" cy="${Y(w.rank).toFixed(1)}" r="4">` +
+    `<title>GW${w.gw} — ${w.rank.toLocaleString()} overall</title></circle>`).join('');
+  const last = rows[rows.length - 1];
+
+  return '<figure class="chartbox">' +
+    '<figcaption class="lab">Overall rank — higher on the chart is better</figcaption>' +
+    `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" aria-label="Line chart of your overall rank across ` +
+      `${rows.length} gameweeks. It runs from ${hi.toLocaleString()} at worst to ${lo.toLocaleString()} at best. ` +
+      'The axis is inverted so a rising line means a rising rank.">' +
+      ticks.map((v) => `<g><line class="grid" x1="${L}" y1="${Y(v)}" x2="${W - R}" y2="${Y(v)}"/>` +
+        `<text class="ax" x="${L - 7}" y="${Y(v) + 3.5}" text-anchor="end">${compact(Math.round(v))}</text></g>`).join('') +
+      `<polyline class="rankline" points="${line}"/>` + dots +
+      `<text class="medlab" x="${W - R + 6}" y="${Y(last.rank) + 3.5}" text-anchor="start">` +
+        `${esc(compact(last.rank))}</text>` +
+      s.weeks.map((w) => `<text class="ax" x="${X(w.gw)}" y="${H - B + 15}" text-anchor="middle">${w.gw}</text>`).join('') +
+    '</svg></figure>';
+}
+
+/* ════════════════════ the people you actually play ══════════════════════ */
+
+/**
+ * Your squad against your mini-league.
+ *
+ * The whole section exists because global ownership answers the wrong question
+ * for a twelve-man league. A player 3% of the world owns and nine of your
+ * rivals own is template in the only table you care about.
+ */
+function renderRivals() {
+  const sec = $('#rivals');
+  const e = leagueEdge(CTX);
+  if (!e) { sec.hidden = true; return; }
+  sec.hidden = false;
+
+  $('#rivalNote').innerHTML =
+    `${esc(e.leagueName)} · top ${e.covered} of ${e.size ? compact(e.size) : 'the league'}` +
+    ` · GW${e.gw} squads`;
+
+  const bar = (r) => {
+    const w = Math.max(2, r.share);
+    return `<span class="ebar"><i style="width:${w.toFixed(0)}%"></i></span>`;
+  };
+  // Exactly seven cells per row, always. Emitting a tag only when there is one
+  // to show changes the child count, and a grid row with a different number of
+  // children wraps onto a second line — which is what made every penalty taker
+  // look broken.
+  const line = (r) => {
+    const t = TEAM.get(r.player.team) || {};
+    return `<div class="erow${r.yours ? ' mine' : ''}">` +
+      `<span class="badge">${esc(t.short || '')}</span>` +
+      `<button class="who lk" data-pick="${r.player.id}">${esc(r.player.name)}</button>` +
+      `<span class="etags">${statusTag(r.player)}${penTag(r.player)}</span>` +
+      bar(r) +
+      `<span class="num eshare" title="${r.owners} of ${e.covered} rivals">${r.share.toFixed(0)}%</span>` +
+      `<span class="num eglob" title="Owned by ${r.global}% of all managers">${(r.global || 0).toFixed(1)}%</span>` +
+      `<span class="num eproj">${r.proj.toFixed(1)}<small> xP</small></span>` +
+      '</div>';
+  };
+
+  const head = (t, sub) => `<div class="ehead"><span class="lab">${esc(t)}</span>` +
+    `<span class="esub">${esc(sub)}</span></div>`;
+
+  $('#rivalCols').innerHTML =
+    '<div class="ecol">' + head('Your squad, rarest first',
+      `${e.differentials.length} owned by a quarter of them or fewer`) +
+      e.squad.map(line).join('') + '</div>' +
+    '<div class="ecol">' + head('What they have and you do not',
+      e.against.length ? `${e.against[0].owners} of ${e.covered} hold the top one` : 'nothing') +
+      (e.against.length ? e.against.map(line).join('')
+        : '<p class="note">You own everything this league owns.</p>') + '</div>';
+
+  const cap = e.topCaptain;
+  $('#rivalCaps').innerHTML = !cap ? '' :
+    '<div class="capbox">' + head('Where the armbands went',
+      `${e.captainSpread} different captain${e.captainSpread === 1 ? '' : 's'} across ${e.covered} squads`) +
+    e.captains.map((c) => {
+      const pct = (c.captains / e.covered) * 100;
+      return `<div class="erow${c.yours ? ' mine' : ''}">` +
+        `<span class="badge">${esc((TEAM.get(c.player.team) || {}).short || '')}</span>` +
+        `<button class="who lk" data-pick="${c.player.id}">${esc(c.player.name)}</button>` +
+        `<span class="etags">${c.yours ? '<span class="tag mine">yours</span>' : ''}</span>` +
+        `<span class="ebar"><i style="width:${pct.toFixed(0)}%"></i></span>` +
+        `<span class="num eshare">${c.captains}<small>/${e.covered}</small></span>` +
+        `<span class="num eglob">${(c.global || 0).toFixed(1)}%</span>` +
+        `<span class="num eproj">${c.proj.toFixed(1)}<small> xP</small></span></div>`;
+    }).join('') + '</div>';
+
+  $('#rivalCaveat').textContent =
+    `Counted over the ${e.covered} squads above you in ${e.leagueName}, not the whole league — ` +
+    'a league share here is a share of those twelve. Squads lock at the deadline, so they are ' +
+    `fetched once a gameweek. Global ownership is FPL's own figure and covers everybody.`;
+
+  $$('#rivals [data-pick]').forEach((b) => b.addEventListener('click', () => openPlayer(Number(b.dataset.pick))));
+}
+
+/* ═══════════════════ scoring the advice afterwards ══════════════════════ */
+
+/**
+ * Whether the advice was any good.
+ *
+ * Everything else on this page tells you what to do. This is the only section
+ * that says whether the last thing it told you to do was right, which is what
+ * makes the rest of it checkable rather than something to take on trust.
+ */
+function renderReview() {
+  const sec = $('#review');
+  const r = adviceReview(PREDICTIONS, TIMELINE, CTX);
+  if (!r) { sec.hidden = true; return; }
+  sec.hidden = false;
+
+  if (r.waiting) {
+    $('#reviewNote').textContent = 'nothing scored yet';
+    $('#reviewCalls').innerHTML =
+      '<p class="note">The projections for the coming gameweek are on record and locked at the deadline. ' +
+      'Once that round is scored, this is where the calls get marked.</p>';
+    $('#reviewCal').innerHTML = '';
+    $('#reviewCaveat').textContent = '';
+    return;
+  }
+
+  const w = r.latest, s = r.season;
+  $('#reviewNote').textContent =
+    `${s.weeks} gameweek${s.weeks === 1 ? '' : 's'} scored · ` +
+    `average error ${s.maeTop} points on the players it rated ${s.threshold}+`;
+
+  /* ── last week's calls ── */
+  const call = (lab, verdict, detail, delta) => {
+    const tone = delta == null ? '' : delta > 0 ? 'good' : delta < 0 ? 'bad' : 'level';
+    return `<div class="callrow ${tone}"><span class="lab">${esc(lab)}</span>` +
+      `<span class="call-v">${esc(verdict)}</span>` +
+      `<span class="call-d">${esc(detail)}</span>` +
+      `<span class="call-n num">${delta == null ? '—' : signed(delta, 0)}</span></div>`;
+  };
+
+  const rows = [];
+  if (w.captain) {
+    const a = w.captain.advised, y = w.captain.yours;
+    rows.push(w.captain.same
+      ? call('Captain', `${a ? a.name : '—'}, as advised`,
+          a && a.pts != null ? `${a.pts} points, doubled to ${a.pts * 2}` : 'no score recorded', 0)
+      : call('Captain',
+          `said ${a ? a.name : '—'}, you had ${y ? y.name : '—'}`,
+          a && y && a.pts != null && y.pts != null
+            ? `${a.pts} against ${y.pts}, and the armband doubles it`
+            : 'no score recorded',
+          w.captain.delta));
+  }
+  if (w.transfer) {
+    const t = w.transfer;
+    rows.push(call('Transfer',
+      `${t.out.name} → ${t.in.name}${t.taken ? ', made' : ', not made'}`,
+      t.out.pts != null && t.in.pts != null
+        ? `${t.in.name} scored ${t.in.pts}, ${t.out.name} scored ${t.out.pts}`
+        : 'no score recorded',
+      t.delta));
+  }
+  if (w.xi && w.xi.yours != null) {
+    rows.push(call('Starting eleven',
+      w.xi.delta === 0 ? 'the same eleven' : `${w.xi.advised} against your ${w.xi.yours}`,
+      w.xi.delta === 0 ? 'nothing in it' :
+        w.xi.delta > 0 ? 'the suggested eleven would have scored more' : 'yours scored more',
+      w.xi.delta));
+  }
+  rows.push(call('Projection', `expected ${w.expected == null ? '—' : w.expected}`,
+    `error ${w.maeTop} a player on the ${w.nTop} it rated ${w.threshold}+`, null));
+
+  $('#reviewCalls').innerHTML =
+    `<div class="callhead"><span class="lab">GW${w.gw} · what was said, and what happened</span></div>` +
+    rows.join('');
+
+  /* ── how well the projections track reality ── */
+  $('#reviewCal').innerHTML = reliabilityChart(s) + biasByPosition(s);
+
+  const dir = s.biasTop > 0.15 ? `optimistic by ${s.biasTop.toFixed(2)} a player`
+    : s.biasTop < -0.15 ? `cautious by ${Math.abs(s.biasTop).toFixed(2)} a player`
+    : 'close to even';
+  $('#reviewCaveat').textContent =
+    `Across ${s.weeks} scored gameweek${s.weeks === 1 ? '' : 's'} the model runs ${dir} on the ` +
+    `${s.nTop} projections of ${s.threshold} points or more. Every figure here comes from what was ` +
+    'written down before the deadline and locked when it passed — a projection edited afterwards ' +
+    'would not be one.';
+}
+
+/**
+ * Predicted against actual, per band. A point on the dashed line is a
+ * projection that came true on average; above it the model was too cautious,
+ * below it too optimistic.
+ */
+function reliabilityChart(s) {
+  const bands = s.bands.filter((b) => b.predicted != null && b.actual != null);
+  if (bands.length < 2) return '';
+  const W = 900, H = 230, L = 46, R = 16, T = 16, B = 40;
+  const top = Math.ceil(Math.max(...bands.map((b) => Math.max(b.predicted, b.actual))) + 1);
+  const X = (v) => L + (v / top) * (W - L - R);
+  const Y = (v) => H - B - (v / top) * (H - T - B);
+  const ticks = [];
+  for (let v = 0; v <= top; v += top > 8 ? 2 : 1) ticks.push(v);
+
+  const dots = bands.map((b) =>
+    `<circle class="dot" cx="${X(b.predicted).toFixed(1)}" cy="${Y(b.actual).toFixed(1)}" ` +
+    `r="${Math.min(9, 4 + Math.log10(Math.max(1, b.n)) * 2).toFixed(1)}">` +
+    `<title>Projected ${b.lo} to ${b.hi === Infinity ? 'more' : b.hi} — ${b.n} projections\n` +
+    `said ${b.predicted} on average, they scored ${b.actual}</title></circle>`).join('');
+  const path = bands.map((b) => `${X(b.predicted).toFixed(1)},${Y(b.actual).toFixed(1)}`).join(' ');
+
+  return '<figure class="chartbox">' +
+    '<figcaption class="lab">What it projected against what they scored</figcaption>' +
+    `<svg class="scatter" viewBox="0 0 ${W} ${H}" role="img" aria-label="Reliability plot. ` +
+      `Each point is a band of projections: the horizontal position is what the model said, the ` +
+      `vertical position what those players actually averaged. Points on the dashed diagonal are ` +
+      `projections that came true. There are ${bands.length} bands covering ${s.n} projections.">` +
+      ticks.map((v) => `<g><line class="grid" x1="${L}" y1="${Y(v)}" x2="${W - R}" y2="${Y(v)}"/>` +
+        `<text class="ax" x="${L - 7}" y="${Y(v) + 3.5}" text-anchor="end">${v}</text></g>`).join('') +
+      ticks.map((v) => `<text class="ax" x="${X(v)}" y="${H - B + 15}" text-anchor="middle">${v}</text>`).join('') +
+      `<line class="avgline" x1="${X(0)}" y1="${Y(0)}" x2="${X(top)}" y2="${Y(top)}"/>` +
+      `<text class="medlab" x="${X(top * 0.62) + 8}" y="${Y(top * 0.62) + 16}" text-anchor="start">` +
+        'projection came true</text>' +
+      `<polyline class="rankline" points="${path}"/>` + dots +
+      `<text class="axlab" x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle">Projected points</text>` +
+      `<text class="axlab" transform="translate(11 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">` +
+        'Actually scored</text>' +
+    '</svg></figure>';
+}
+
+/** Where the model is wrong, by position — it is never wrong evenly. */
+function biasByPosition(s) {
+  const rows = s.byPos.filter((r) => r.bias != null);
+  if (!rows.length) return '';
+  const max = Math.max(0.4, ...rows.map((r) => Math.abs(r.bias)));
+  return '<div class="biasbox"><span class="lab">Bias by position — right of centre is optimistic</span>' +
+    rows.map((r) => {
+      const w = (Math.abs(r.bias) / max) * 50;
+      const side = r.bias >= 0 ? 'left:50%' : `right:50%`;
+      return `<div class="biasrow"><span class="bp">${esc(r.pos)}</span>` +
+        `<span class="btrack"><i class="bfill ${r.bias >= 0 ? 'over' : 'under'}" ` +
+        `style="${side};width:${w.toFixed(1)}%"></i></span>` +
+        `<span class="num bv">${signed(r.bias, 2)}</span>` +
+        `<span class="bn">${r.n}</span></div>`;
+    }).join('') + '</div>';
+}
+
+/* ══════════════════════════ chip timing ═════════════════════════════════ */
+
+/** How each chip's number should be read, and in what unit. */
+const CHIP_READ = {
+  bboost: { key: 'bboost', unit: 'pts', why: (w) => `your bench projects ${w.bboost} that week` },
+  '3xc': { key: 'tc', unit: 'pts', why: (w) => `${w.captain ? w.captain.name : 'your captain'} projects ${w.tc} — a third copy of that` },
+  freehit: { key: 'freehit', unit: 'pts', why: (w) => `your eleven falls ${w.freehit} below a normal week` },
+  wildcard: { key: 'wildcard', unit: 'FDR', why: (w) => `the hardest three-week run ahead, at ${w.wildcard} average difficulty` },
+};
+
+function renderChipTiming() {
+  const sec = $('#chiptiming');
+  const p = chipPlanner(CTX);
+  if (!p) { sec.hidden = true; return; }
+  sec.hidden = false;
+
+  const used = new Set((CTX.entry.chipsUsed || []).map((c) => (c.name || '').toLowerCase()));
+  const spans = p.to > p.horizonTo ? `GW${p.from}–${p.to}` : `GW${p.from}–${p.horizonTo}`;
+  $('#chipNote').textContent =
+    `${spans} · ${p.blankWeeks.length} blank and ${p.doubleWeeks.length} double week${p.doubleWeeks.length === 1 ? '' : 's'} ahead`;
+
+  $('#chipPicks').innerHTML = Object.values(CHIPS).map((c) => {
+    const r = CHIP_READ[c.key];
+    const pick = p.picks[c.key] || {};
+    const w = pick.best;
+    const spent = used.has(c.name.toLowerCase());
+    const val = w ? w[r.key] : null;
+    return `<div class="cpick${spent ? ' spent' : ''}">` +
+      `<span class="cp-name"><i>${c.icon}</i>${esc(c.name)}</span>` +
+      (spent
+        ? '<span class="cp-when">already played</span><span class="cp-why">nothing left to time</span>'
+        : w
+          ? `<button class="cp-when" data-chipgw="${w.gw}" title="Edit GW${w.gw} in the planner">GW${w.gw}</button>` +
+            `<span class="cp-why">${esc(r.why(w))}` +
+            (pick.next ? ` · then GW${pick.next.gw}` : '') + '</span>'
+          : '<span class="cp-when dim">no week stands out</span>' +
+            `<span class="cp-why">${esc(c.key === 'freehit'
+              ? 'no week ahead is worse than usual for this squad'
+              : 'nothing in range scores it')}</span>`) +
+      `<span class="cp-val num">${val == null ? '—' : (r.unit === 'FDR' ? val.toFixed(2) : signed(val, 1))}` +
+      `<small> ${r.unit}</small></span></div>`;
+  }).join('');
+
+  // The weeks themselves, so the recommendation can be checked rather than
+  // taken on trust.
+  const rows = p.weeks.filter((w) => w.rated || w.blankCount || w.doubleCount);
+  $('#chipGrid').innerHTML = !rows.length ? '' :
+    '<div class="tw"><table class="st chipgrid"><thead><tr><th class="l">Week</th><th>Blank</th><th>Double</th>' +
+    '<th>XI</th><th>Bench</th><th>Captain</th><th class="l read">What it says</th></tr></thead><tbody>' +
+    rows.map((w) => {
+      const tone = w.blankCount ? 'bad' : w.doubleCount ? 'good' : '';
+      const note = w.blankCount && w.doubleCount ? `${w.blankCount} blank, ${w.doubleCount} double`
+        : w.blankCount ? `${w.blankCount} of yours has no game`
+        : w.doubleCount ? `${w.doubleCount} of yours plays twice`
+        : w.rated ? '' : 'fixtures only';
+      return `<tr class="${tone}"><td class="l rk">GW${w.gw}` +
+        (w.rated ? '' : '<i class="far" title="Beyond the projection horizon — fixtures only">·</i>') + '</td>' +
+        `<td class="num${w.blankCount ? ' d' : ''}">${w.blankCount || '·'}</td>` +
+        `<td class="num${w.doubleCount ? ' u' : ''}">${w.doubleCount || '·'}</td>` +
+        `<td class="num">${w.xiPoints == null ? '—' : w.xiPoints.toFixed(1)}</td>` +
+        `<td class="num">${w.benchPoints == null ? '—' : w.benchPoints.toFixed(1)}</td>` +
+        `<td class="num">${w.captainPoints == null ? '—' : w.captainPoints.toFixed(1)}</td>` +
+        `<td class="l dim read">${esc(note)}</td></tr>`;
+    }).join('') + '</tbody></table></div>';
+
+  $('#chipCaveat').textContent =
+    `Points are projected only as far as GW${p.horizonTo}; weeks after that are marked · and report ` +
+    'the fixture list alone — how many of your fifteen have no game, and how many play twice. ' +
+    (p.scheduleKnown
+      ? 'Blanks and doubles move as the FA reschedules, so a week that looks empty now may fill.'
+      : 'No forward schedule in this snapshot, so no blanks or doubles can be reported.');
+
+  $$('#chipPicks [data-chipgw]').forEach((b) => b.addEventListener('click', () => {
+    SB_GW = Number(b.dataset.chipgw);
+    if (!CTX.gws.includes(SB_GW)) { SB_GW = CTX.gws[0]; }
+    renderPlanner();
+    $('#planner').scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }));
 }
 
 function movement(rank, last) {
@@ -2374,6 +2860,10 @@ function renderAll() {
   renderDashboard();
   renderScoreBug();
   renderSquad();
+  renderSeason();
+  renderRivals();
+  renderReview();
+  renderChipTiming();
   renderMatches();
   renderLeagues();
   renderPlanner();
@@ -2406,10 +2896,14 @@ Promise.all([
   grab('data/details.json', {}),
   grab('data/changes.json', null),
   grab('data/prices.json', null),
-]).then(([snap, details, changes, prices]) => {
+  grab('data/predictions.json', null),
+  grab('data/timeline.json', null),
+]).then(([snap, details, changes, prices, predictions, timeline]) => {
   DETAILS = details || {};
   CHANGES = changes;
   PRICELOG = prices;
+  PREDICTIONS = predictions;
+  TIMELINE = timeline;
   // A ?team= in the URL skips the chooser, so a direct link can go straight to
   // one manager. Otherwise nothing is selected yet and the gate decides.
   const asked = new URLSearchParams(location.search).get('team');
