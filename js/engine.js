@@ -145,7 +145,19 @@ export function buildContext(snapshot, details = {}, team = null) {
     p.proj = p.fixtures.map((f) => projectGw(p, f, gwPlayed));
     p.net = (p.tIn || 0) - (p.tOut || 0);
     p.ratio = p.price_ ? p.price_.ratio : 0;
-    p.progress = Math.round((p.ratio / 0.075) * 100);
+    /* Progress toward a price change is FPL's own figure, not ours.
+     *
+     * It used to be estimated as net transfers over the player's own owner
+     * count — which is structurally wrong: it says a player owned by 2% needs
+     * sixteen times fewer net transfers than one owned by 40%, and it read ~90×
+     * too high against the official predictor. FPL publishes the real number
+     * now, so it is read.
+     *
+     * When the snapshot predates that field, progress is NULL rather than
+     * estimated. A figure ninety times out is worse than no figure, and every
+     * consumer falls back to reporting net transfers, which is a fact. */
+    p.progress = Number.isFinite(p.pricePct) ? Math.round(p.pricePct) : null;
+    p.progressSource = Number.isFinite(p.pricePct) ? 'fpl' : null;
     p.seasonDelta = round(p.price - p.priceStart, 1);
     p.ownDelta = snapshot.totalManagers ? (p.net / snapshot.totalManagers) * 100 : 0;
     byId.set(p.id, p);
@@ -531,6 +543,51 @@ export function optimalXI(squadPlayers, gwIndex = 0, key = null) {
   best.captain = best.xi.slice().sort((a, b) => value(b) - value(a))[0] || null;
   best.vice = best.xi.slice().sort((a, b) => value(b) - value(a))[1] || null;
   return best;
+}
+
+/* ─────────────────────── FPL's price predictor ─────────────────────────── */
+
+/**
+ * How FPL rates a player's chance of changing price.
+ *
+ * `likelihood` is FPL's own signed confidence: the sign is the direction, the
+ * magnitude is how sure. The words below are a gloss on that magnitude — the
+ * percentage is the number that matters and the raw rating travels with it, so
+ * the gloss can always be checked.
+ */
+const LIKELIHOOD_WORD = { 5: 'very likely', 4: 'likely', 3: 'possible', 2: 'unlikely', 1: 'unlikely', 0: 'no change' };
+
+export function priceOutlook(p) {
+  const pct = Number.isFinite(p.pricePct) ? p.pricePct : null;
+  if (pct == null) {
+    // No official figure in this snapshot. Report the flow, claim no threshold.
+    return {
+      known: false, pct: null, dir: 0, word: null, likelihood: null,
+      net: p.net || 0, rate: null, projections: [],
+    };
+  }
+  const proj = (p.priceProj || []).map((x) => ({
+    day: x.d,
+    pct: x.pct,
+    likelihood: x.like,
+    dir: x.pct > 0 ? 1 : x.pct < 0 ? -1 : 0,
+    word: x.like == null ? null : LIKELIHOOD_WORD[Math.abs(x.like)] || null,
+  }));
+  const today = proj.find((x) => x.day === 0) || null;
+  const like = today && today.likelihood != null ? today.likelihood : null;
+  return {
+    known: true,
+    pct: round(pct, 1),
+    dir: pct > 0 ? 1 : pct < 0 ? -1 : 0,
+    likelihood: like,
+    word: like == null ? null : LIKELIHOOD_WORD[Math.abs(like)] || null,
+    // FPL's projection for tonight, tomorrow and the night after.
+    projections: proj,
+    rate: Number.isFinite(p.priceRate) ? p.priceRate : null,
+    net: p.net || 0,
+    // Past the threshold is where a change actually happens.
+    over: Math.abs(pct) >= 100,
+  };
 }
 
 /* ────────────────────────── set-piece duty ─────────────────────────────── */
