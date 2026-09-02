@@ -19,6 +19,11 @@ answer has a **Why?** that unfolds the evidence behind it.
 - **Search, filters and ranking** — the market searches every player in the league by surname or club, filters by position, maximum price, club, availability and fixture difficulty, and ranks by projected gain, next gameweek, form, total points, price, ownership, ICT index or the kindness of the run ahead. Nothing is hidden: a player you cannot have still appears, underneath, with the reason.
 - **Formations and the bench** — pick any legal shape from 3-4-3 to 5-4-1 and the eleven rearranges around the players you chose. Drag a shirt onto another or tap them in turn to swap. A move that would break the rules is refused by naming the rule — *"that would leave 2 defenders, you need at least three"* — never with a generic error.
 - **Chips** — play a **Wildcard, Free Hit, Triple Captain or Bench Boost** and the projection recalculates immediately: free transfers for the week, a tripled armband, or all fifteen counting. One of each chip, one week at a time.
+- **Was it right?** — the tool keeps score of its own advice. Every week's projections are written down **before the deadline and locked when it passes**, then marked against what actually happened: the captain it named versus the one you wore the armband on, whether the transfer it suggested paid, and how far the projections ran from reality. A reliability chart plots what it predicted against what those players scored, with bias broken out by position, because the model is never wrong evenly.
+- **Your season** — rank and squad value over time, points a week against what the field managed, and the two figures no FPL surface puts in front of you: **points paid in hits** and **points left on the bench**.
+- **When to play your chips** — every gameweek ahead ranked for Wildcard, Free Hit, Triple Captain and Bench Boost. Inside the six-week projection horizon the weeks are scored in points; beyond it only the fixture list is known, so it reports blanks and doubles and says so rather than inventing a number ten weeks out.
+- **Your league** — ownership inside your mini-league, which is the only ownership that moves your rank in it. A player 3% of the world owns and nine of your rivals own is template where you actually play. Your differentials in that league, what they hold that you do not, and where the armbands went.
+- **Set-piece duty** — who takes the penalties, free kicks and corners, as a badge, a market chip and a filter. It is shown, never scored: the xG already contains the penalties he has taken.
 - **Team news** — every availability line FPL itself publishes, with the timestamp FPL put on it: injuries, bans, doubts with the percentage the game gives them, and the expected return date pulled out and set in bold. Yours first, worst first. Filterable to your own squad, to the ruled out, or to the doubts.
 - **Captaincy** — who the field is captaining and by how much, alongside the differential picks: near the same projection at a fraction of the ownership, with the points swing each one is worth against the popular choice.
 - **What changed** — price moves, availability, form and ownership swings since the previous refresh, with your own players marked.
@@ -363,6 +368,7 @@ It knows nothing about press conferences, rotation risk in a cup week, or who ha
 | `.github/workflows/refresh.yml` | The schedule that runs the fetch |
 | `config.json` | The team IDs of everyone who uses the page |
 | `data/snapshot.json` | Generated. Never edit it by hand |
+| `data/predictions.json` | Generated. What was projected before each deadline, locked once it passed |
 | `data/details.json` | Generated. Season-by-season history |
 
 ## Troubleshooting
