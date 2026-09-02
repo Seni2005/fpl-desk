@@ -12,10 +12,10 @@ import {
   gameweekState, playerTraits, CHIPS, matchSchedule, selectEntry, priceChanges,
   playerMatchState, newsFeed, captaincyBoard,
   slotOptions, finishMarket, MARKET_SORTS, fdrAhead, fillSlots,
-  seasonReview, setPieces, setPieceText, chipPlanner, adviceReview, leagueEdge,
+  seasonReview, setPieces, setPieceText, chipPlanner, adviceReview, leagueEdge, priceOutlook,
   arrangeXI, swapLineup, applyFormation, availableFormations, xiCounts, formationName,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB, SQUAD_SHAPE,
-} from './engine.js?v=15';
+} from './engine.js?v=16';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -1935,13 +1935,22 @@ function renderShelves() {
       `<span>x<b>${p.scores.overall.toFixed(1)}</b></span></span></button>`).join('') + '</div></div>').join('');
 }
 
-/* price watch, now with the cost of waiting */
+/* price watch, now with the cost of waiting.
+   The bands read FPL's own progress figure, where 100 IS the threshold — so
+   "rise due" now means what the official predictor means by it. */
 function priceState(p) {
+  if (p.progress == null) return ['n', 'not published'];
   if (p.progress >= 100) return ['u', 'rise due'];
   if (p.progress >= 55) return ['u', 'rising'];
   if (p.progress <= -100) return ['d', 'fall due'];
   if (p.progress <= -55) return ['d', 'falling'];
   return ['n', 'steady'];
+}
+
+/** FPL's progress, or an em dash — never a zero standing in for "unknown". */
+function progressText(p) {
+  if (p.progress == null) return '<span class="dimtxt">–</span>';
+  return `${p.progress > 0 ? '+' : p.progress < 0 ? '−' : ''}${Math.abs(p.progress)}%`;
 }
 function renderPrices() {
   const q = prefs.pQ.trim().toLowerCase();
@@ -1951,7 +1960,7 @@ function renderPrices() {
     if (prefs.pMine && !mine.has(p.id)) return false;
     if (prefs.pDir === 'up' && p.progress < 55) return false;
     if (prefs.pDir === 'down' && p.progress > -55) return false;
-    if (prefs.pDir === 'all' && Math.abs(p.progress) < 5 && p.seasonDelta === 0) return false;
+    if (prefs.pDir === 'all' && p.progress != null && Math.abs(p.progress) < 5 && p.seasonDelta === 0) return false;
     if (q) {
       const t = TEAM.get(p.team) || {};
       if (`${p.full} ${p.name} ${t.name || ''} ${t.short || ''}`.toLowerCase().indexOf(q) === -1) return false;
@@ -1974,9 +1983,13 @@ function renderPrices() {
 
   $('#priceRows').innerHTML = rows.slice(0, CAP).map((p) => {
     const t = TEAM.get(p.team) || {}, st = priceState(p);
-    const w = Math.min(50, (Math.abs(p.progress) / 200) * 50);
+    const w = Math.min(50, (Math.abs(p.progress || 0) / 200) * 50);
     const bar = '<span class="mk l"></span><span class="mk r"></span>' +
-      (p.progress === 0 ? '' : `<i class="${p.progress > 0 ? 'u' : 'd'}" style="width:${w.toFixed(1)}%"></i>`);
+      (!p.progress ? '' : `<i class="${p.progress > 0 ? 'u' : 'd'}" style="width:${w.toFixed(1)}%"></i>`);
+    // FPL's projection for tonight, so the row answers "is it happening tonight"
+    // and not only "how far along is he".
+    const out = priceOutlook(p);
+    const tonight = out.projections.find((x) => x.day === 0);
     // what waiting actually costs, in the direction that matters to you
     let impact = '<span class="dimtxt">–</span>';
     if (p.progress >= 100 && !mine.has(p.id)) impact = '<span class="pc d">−£0.1m to wait</span>';
@@ -1988,8 +2001,13 @@ function renderPrices() {
       `<span class="sub">${esc(t.short || '')} · ${p.pos}</span></td>` +
       `<td class="num">£${p.price.toFixed(1)}</td>` +
       `<td class="num hide-sm">${p.seasonDelta === 0 ? '<span class="dimtxt">–</span>' : `<span class="pc ${p.seasonDelta > 0 ? 'u' : 'd'}" style="width:auto">${signed(p.seasonDelta)}</span>`}</td>` +
-      `<td><span class="prog"><span class="track">${bar}</span><span class="pc ${st[0]}">${p.progress > 0 ? '+' : p.progress < 0 ? '−' : ''}${Math.abs(p.progress)}%</span></span></td>` +
-      `<td class="l hide-xs"><span class="state ${st[0]}"><b>${st[1]}</b></span></td>` +
+      `<td><span class="prog"><span class="track">${bar}</span>` +
+        `<span class="pc ${st[0]}" title="${esc(out.known
+          ? `FPL's own figure. 100% is the threshold.${out.rate != null ? ` Moving ${signed(out.rate, 0)}% an hour.` : ''}`
+          : 'FPL has not published a figure for this player in this snapshot.')}">${progressText(p)}</span></span></td>` +
+      `<td class="l hide-xs"><span class="state ${st[0]}"><b>${st[1]}</b></span>` +
+        (tonight && tonight.word
+          ? `<span class="sub">${esc(tonight.word)} tonight</span>` : '') + '</td>' +
       `<td class="l hide-sm">${impact}</td>` +
       `<td class="num hide-xs">${p.owned.toFixed(1)}%</td>` +
       `<td class="num hide-sm"><span class="pc ${p.ownDelta > 0.005 ? 'u' : p.ownDelta < -0.005 ? 'd' : 'n'}" style="width:auto">${Math.abs(p.ownDelta) < 0.005 ? '–' : signed(p.ownDelta, 2)}</span></td>` +
@@ -2337,7 +2355,7 @@ function openPlayer(pid) {
 
   b += `<div class="blk"><span class="lab">Price</span><div class="kv">` +
     [['Started', '£' + p.priceStart.toFixed(1)], ['Season', p.seasonDelta === 0 ? '–' : signed(p.seasonDelta)],
-     ['Progress', `${p.progress > 0 ? '+' : p.progress < 0 ? '−' : ''}${Math.abs(p.progress)}%`],
+     ['Progress', progressText(p)],
      ['Net transfers', p.net === 0 ? '–' : (p.net > 0 ? '+' : '−') + compact(Math.abs(p.net))],
      ['Own change', Math.abs(p.ownDelta) < 0.005 ? '–' : signed(p.ownDelta, 2)], ['Status', st[1]]]
       .map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('') + '</div></div>';
@@ -2733,7 +2751,7 @@ function renderPriceLog() {
     (all.tightest <= 20
       ? `as tight as ${all.tightest} minutes on recent nights, ${w >= 60 ? `up to ${Math.round(w / 60)}h` : `${w} min`} on older ones.`
       : `currently up to ${w >= 60 ? `${Math.round(w / 60)}h` : `${w} min`} wide.`) +
-    ' The table below this is the opposite: a prediction of what is coming, not a record of what happened.';
+    " The table below this is the opposite: FPL's own forecast of what is coming, not a record of what happened.";
 
   $$('#plSeg [data-plf]').forEach((b) => b.addEventListener('click', () => {
     PL_FILTER = b.dataset.plf; renderPriceLog();
