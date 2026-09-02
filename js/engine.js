@@ -533,6 +533,109 @@ export function optimalXI(squadPlayers, gwIndex = 0, key = null) {
   return best;
 }
 
+/* ────────────────────────── set-piece duty ─────────────────────────────── */
+
+/**
+ * Who takes what. FPL publishes an order per routine and we surface it, because
+ * a first-choice penalty taker at a decent side is the most reliable cheap edge
+ * in the dataset.
+ *
+ * It is deliberately NOT folded into the projection. The xG already contains
+ * every penalty he has taken, so adding a bonus would double-count him — and
+ * for a player who has just been handed the job there is no honest coefficient
+ * to apply, only a made-up one. Shown, not scored.
+ */
+export const SET_PIECE_ROUTINES = [
+  { key: 'pens', label: 'Penalties', short: 'PEN' },
+  { key: 'fks', label: 'Free kicks', short: 'FK' },
+  { key: 'corners', label: 'Corners', short: 'COR' },
+];
+
+export function setPieces(p, limit = 3) {
+  return SET_PIECE_ROUTINES
+    .filter((r) => p[r.key] != null && p[r.key] >= 1 && p[r.key] <= limit)
+    .map((r) => ({ ...r, order: p[r.key], first: p[r.key] === 1 }));
+}
+
+/** "penalties (1st), corners (2nd)" — the phrase a badge or tooltip needs. */
+export function setPieceText(p) {
+  return setPieces(p)
+    .map((r) => `${r.label.toLowerCase()} (${ordinalShort(r.order)})`)
+    .join(', ');
+}
+const ordinalShort = (n) => n + (['th', 'st', 'nd', 'rd'][n] || 'th');
+
+/* ───────────────────────────── your season ─────────────────────────────── */
+
+/**
+ * The season so far, from the history FPL already hands us.
+ *
+ * Every week's NET score is taken as the change in the running total rather
+ * than from the `points` field. FPL's labelling of whether a gameweek score is
+ * quoted before or after the transfer cost has moved between seasons, and the
+ * running total cannot be ambiguous — it is what you actually have. The hit is
+ * then reported beside it rather than hidden inside it.
+ */
+export function seasonReview(ctx) {
+  const rows = ((ctx.entry && ctx.entry.seasonHistory) || []).slice()
+    .sort((a, b) => a.gw - b.gw);
+  if (!rows.length) return null;
+
+  const field = new Map((ctx.snapshot.eventStats || []).map((e) => [e.id, e]));
+  let prevTotal = 0;
+  const weeks = rows.map((w) => {
+    const total = w.total != null ? w.total : prevTotal + (w.pts || 0);
+    const net = round(total - prevTotal, 0);
+    prevTotal = total;
+    const f = field.get(w.gw) || {};
+    return {
+      gw: w.gw,
+      net,                                   // what the week actually added
+      gross: net + (w.hit || 0),             // before the hit was taken off
+      hit: w.hit || 0,
+      bench: w.bench || 0,
+      transfers: w.transfers || 0,
+      total,
+      rank: w.rank ?? null,
+      value: w.value ?? null,
+      bank: w.bank ?? null,
+      average: f.average ?? null,
+      highest: f.highest ?? null,
+      vsAverage: f.average != null ? net - f.average : null,
+    };
+  });
+
+  const sum = (k) => weeks.reduce((s, w) => s + (w[k] || 0), 0);
+  const ranked = weeks.filter((w) => w.rank != null);
+  const rated = weeks.filter((w) => w.vsAverage != null);
+  const byNet = weeks.slice().sort((a, b) => b.net - a.net);
+  const first = weeks[0], last = weeks[weeks.length - 1];
+
+  return {
+    weeks,
+    played: weeks.length,
+    points: last.total,
+    hits: sum('hit'),
+    hitCount: weeks.filter((w) => w.hit > 0).length,
+    bench: sum('bench'),
+    transfers: sum('transfers'),
+    best: byNet[0] || null,
+    worst: byNet[byNet.length - 1] || null,
+    mean: round(sum('net') / weeks.length, 1),
+    beat: rated.filter((w) => w.vsAverage > 0).length,
+    ratedWeeks: rated.length,
+    vsAverage: rated.length ? round(sum('vsAverage'), 0) : null,
+    rank: last.rank ?? null,
+    bestRank: ranked.length ? Math.min(...ranked.map((w) => w.rank)) : null,
+    worstRank: ranked.length ? Math.max(...ranked.map((w) => w.rank)) : null,
+    value: last.value ?? null,
+    // Value gained is measured from the first week on record, not from 100.0 —
+    // a page loaded mid-season has no way to know what the squad started at.
+    valueFrom: first.value ?? null,
+    valueGain: first.value != null && last.value != null ? round(last.value - first.value, 1) : null,
+  };
+}
+
 /* ─────────────────────── lineups you arrange yourself ───────────────────── */
 
 /** How many of each position an eleven contains. */
@@ -1096,6 +1199,8 @@ export function finishMarket(rows, filter, limit) {
   if (f.minPrice != null) out = out.filter((r) => r.player.price >= f.minPrice - 1e-9);
   if (f.avail === 'fit') out = out.filter((r) => r.player.status === 'a');
   else if (f.avail === 'flagged') out = out.filter((r) => r.player.status !== 'a');
+  if (f.setPiece === 'pens') out = out.filter((r) => r.player.pens === 1);
+  else if (f.setPiece === 'any') out = out.filter((r) => setPieces(r.player).length > 0);
   if (f.maxFdr != null) out = out.filter((r) => fdrAhead(r.player, 3) <= f.maxFdr + 1e-9);
   if (f.legalOnly) out = out.filter((r) => r.legal);
 
@@ -1209,6 +1314,18 @@ export function playerTraits(p, limit = 4) {
   if (p.status === 'i' || p.status === 'u') add('out', '🚑', 'Ruled out', 'bad', p.news || 'unavailable', 100);
   else if (p.status === 's') add('ban', '🟥', 'Suspended', 'bad', p.news || 'suspended', 99);
   else if (p.status === 'd') add('doubt', '⚠️', 'Fitness doubt', 'warn', `${p.chance == null ? '50' : p.chance}% chance of playing`, 98);
+
+  // Penalty duty outranks everything except availability. It is the one thing
+  // in this dataset that reliably converts to points and is not already priced
+  // into the xG of a player who has just been given the job.
+  if (p.pens === 1) add('pens', '🥅', 'Penalty taker', 'good', 'first choice', 94);
+  else if (p.pens === 2) add('pens2', '🥅', 'Penalty back-up', 'info', 'second in line', 58);
+
+  const sp = setPieces(p).filter((x) => x.key !== 'pens');
+  if (sp.length) {
+    add('setp', '🚩', 'Set pieces', 'good',
+      sp.map((x) => `${x.label.toLowerCase()} (${x.order})`).join(', '), 76);
+  }
 
   if (r.xG >= 0.45) add('threat', '🔥', 'High goal threat', 'good', `xG/90 ${r.xG.toFixed(2)}`, 90);
   else if (r.xG >= 0.28) add('threat2', '⚽', 'Gets chances', 'good', `xG/90 ${r.xG.toFixed(2)}`, 60);
@@ -1397,6 +1514,386 @@ export function evaluatePlan(plan, ctx, opts = {}) {
     endBank: bank,
     chips: Object.keys(chipUse),
     problems,
+  };
+}
+
+/* ──────────────────── the people you actually play ─────────────────────── */
+
+/**
+ * Ownership inside your mini-league, which is the only ownership that moves
+ * your rank in it.
+ *
+ * Global ownership says what eight million managers hold. It is the wrong
+ * denominator for a twelve-man league: a player owned by 3% of the world and by
+ * nine of your eleven rivals is a template pick where you actually play, and
+ * captaining him protects nothing.
+ *
+ * Everything here is counted over the rivals whose squads were fetched, never
+ * over the whole league — `covered` says how many that was, so a figure from
+ * the top twelve of a two-hundred-man league is never read as the whole table.
+ */
+export function leagueEdge(ctx, opts = {}) {
+  const riv = ctx.entry && ctx.entry.rivals;
+  if (!riv || !riv.managers || !riv.managers.length || !ctx.squad.length) return null;
+
+  const managers = riv.managers.filter((m) => Array.isArray(m.picks) && m.picks.length);
+  if (!managers.length) return null;
+  const n = managers.length;
+  const mine = new Set(ctx.squad.map((s) => s.id));
+
+  const held = new Map();          // player id → how many rivals own him
+  const capped = new Map();        // player id → how many rivals captained him
+  for (const m of managers) {
+    for (const id of new Set(m.picks.map((p) => p.id))) held.set(id, (held.get(id) || 0) + 1);
+    if (m.captain != null) capped.set(m.captain, (capped.get(m.captain) || 0) + 1);
+  }
+
+  const row = (id) => {
+    const p = ctx.byId.get(id);
+    if (!p) return null;
+    const owners = held.get(id) || 0;
+    return {
+      player: p,
+      owners,
+      share: round((owners / n) * 100, 1),
+      global: p.owned,
+      // The gap between the two is the whole point: a player the world barely
+      // owns can still be template in here, and the reverse.
+      edge: round((owners / n) * 100 - (p.owned || 0), 1),
+      captains: capped.get(id) || 0,
+      yours: mine.has(id),
+      proj: p.proj && p.proj[0] != null ? round(p.proj[0], 2) : 0,
+    };
+  };
+
+  const squad = ctx.squad.map((s) => row(s.id)).filter(Boolean)
+    .sort((a, b) => a.share - b.share);
+
+  // What they have that you do not, ranked by how much of the league holds it.
+  const against = [...held.keys()]
+    .filter((id) => !mine.has(id))
+    .map(row).filter(Boolean)
+    .sort((a, b) => b.owners - a.owners || b.proj - a.proj)
+    .slice(0, opts.limit || 12);
+
+  const captainRows = [...capped.entries()]
+    .map(([id, c]) => ({ ...row(id), captains: c }))
+    .filter(Boolean)
+    .sort((a, b) => b.captains - a.captains);
+
+  const differentials = squad.filter((r) => r.owners <= Math.max(1, Math.floor(n * 0.25)));
+  const template = squad.filter((r) => r.owners >= Math.ceil(n * 0.75));
+
+  return {
+    leagueId: riv.leagueId,
+    leagueName: riv.leagueName,
+    gw: riv.gw,
+    size: riv.size || null,
+    covered: n,                    // rivals whose squads we actually hold
+    managers,
+    squad,
+    differentials,
+    template,
+    against,
+    captains: captainRows,
+    // How concentrated the armband is in here. One captain on nine of twelve is
+    // a very different week from four captains on three each.
+    topCaptain: captainRows[0] || null,
+    captainSpread: captainRows.length,
+    // Players you own that nobody else does — where a good week gains most.
+    unique: squad.filter((r) => r.owners === 0),
+  };
+}
+
+/* ─────────────────────── scoring the advice ────────────────────────────── */
+
+/**
+ * Predicted-points bands for the reliability read. Wide at the top because
+ * almost nobody is projected nine points and a band with four players in it
+ * says nothing.
+ */
+export const CALIBRATION_BANDS = [
+  [0, 1], [1, 2], [2, 4], [4, 6], [6, 9], [9, Infinity],
+];
+
+/** A projection worth being judged on. Below this the answer is always "nearly nil". */
+const MEANINGFUL_PROJ = 2;
+
+/**
+ * How the advice actually did.
+ *
+ * A tool that names a captain every week and never looks back is asking to be
+ * believed rather than checked. `predictions.json` holds what was said before
+ * each deadline — locked at the deadline, so it cannot be edited into being
+ * right — and `timeline.json` holds what happened. This joins them.
+ *
+ * Two things are scored and they are different questions. The MODEL is scored
+ * by how close its projections came. The ADVICE is scored by whether the
+ * specific calls beat what you actually did, which is the only comparison that
+ * would have changed your season.
+ */
+export function adviceReview(predictions, timeline, ctx, opts = {}) {
+  const store = predictions && predictions.gws;
+  const rows = timeline && timeline.players;
+  if (!store || !rows) return null;
+
+  /** What a player actually scored in that gameweek, or null if unrecorded. */
+  const actual = (id, gw) => {
+    const hist = rows[String(id)];
+    if (!hist) return null;
+    const cur = hist[String(gw)];
+    if (!cur) return null;
+    if (cur.length > 3 && cur[3] != null) return cur[3];
+    // Older rows carry only the running total, so difference it out. This is
+    // why the gameweek's own points were added — one missing refresh and the
+    // difference is silently wrong rather than absent.
+    const prev = hist[String(gw - 1)];
+    if (prev && cur[2] != null && prev[2] != null) return cur[2] - prev[2];
+    return null;
+  };
+
+  const key = ctx.entry ? ctx.entry.key : null;
+  const name = (id) => { const p = ctx.byId.get(id); return p ? p.name : `#${id}`; };
+  const pos = (id) => { const p = ctx.byId.get(id); return p ? p.pos : null; };
+
+  const weeks = [];
+  const pool = [];                                  // every scored (pred, act) pair
+
+  for (const gwKey of Object.keys(store).sort((a, b) => Number(a) - Number(b))) {
+    const gw = Number(gwKey);
+    const rec = store[gwKey];
+    // A week still open has nothing to score, and a week never locked was never
+    // a prediction — it could have been written after kickoff.
+    if (!rec || !rec.locked || !Array.isArray(rec.rows)) continue;
+
+    const pairs = [];
+    for (const [id, proj] of rec.rows) {
+      const got = actual(id, gw);
+      if (got == null) continue;
+      pairs.push({ id, proj, got, pos: pos(id) });
+    }
+    if (!pairs.length) continue;
+    pool.push(...pairs);
+
+    const week = { gw, at: rec.at, n: pairs.length, ...errorStats(pairs) };
+
+    const mine = rec.entries && key ? rec.entries[key] : null;
+    if (mine) {
+      const yourPicks = mine.picks || [];
+      const yourCap = yourPicks.find((p) => p[2] > 1);
+      const advisedCap = mine.captain;
+      week.captain = {
+        advised: advisedCap == null ? null
+          : { id: advisedCap, name: name(advisedCap), pts: actual(advisedCap, gw) },
+        yours: !yourCap ? null
+          : { id: yourCap[0], name: name(yourCap[0]), pts: actual(yourCap[0], gw) },
+        same: !!(yourCap && advisedCap === yourCap[0]),
+      };
+      const a = week.captain.advised, y = week.captain.yours;
+      // The armband doubles whichever man wore it, so the gap between two
+      // candidates is doubled too. That is the number that changed your score.
+      week.captain.delta = a && y && a.pts != null && y.pts != null
+        ? round((a.pts - y.pts) * 2, 0) : null;
+
+      if (mine.transfer) {
+        const out = actual(mine.transfer.out, gw), inc = actual(mine.transfer.in, gw);
+        week.transfer = {
+          out: { id: mine.transfer.out, name: name(mine.transfer.out), pts: out },
+          in: { id: mine.transfer.in, name: name(mine.transfer.in), pts: inc },
+          delta: out != null && inc != null ? inc - out : null,
+          // Whether you took it is knowable: the incoming player is in the
+          // squad you fielded and the outgoing one is not.
+          taken: yourPicks.some((p) => p[0] === mine.transfer.in) &&
+                 !yourPicks.some((p) => p[0] === mine.transfer.out),
+        };
+      }
+
+      if (Array.isArray(mine.xi) && mine.xi.length) {
+        const yourXI = yourPicks.filter((p) => p[1] <= 11).map((p) => p[0]);
+        const sum = (ids) => ids.reduce((s, id) => {
+          const v = actual(id, gw); return v == null ? s : s + v;
+        }, 0);
+        week.xi = {
+          advised: sum(mine.xi),
+          yours: yourXI.length ? sum(yourXI) : null,
+          delta: yourXI.length ? sum(mine.xi) - sum(yourXI) : null,
+        };
+      }
+      week.expected = mine.expected ?? null;
+      week.confidence = mine.confidence ?? null;
+    }
+    weeks.push(week);
+  }
+
+  if (!weeks.length) return { weeks: [], season: null, latest: null, waiting: true };
+
+  const season = { ...errorStats(pool), n: pool.length, weeks: weeks.length };
+  season.byPos = ['GKP', 'DEF', 'MID', 'FWD'].map((p) => {
+    const sub = pool.filter((r) => r.pos === p && r.proj >= MEANINGFUL_PROJ);
+    return { pos: p, n: sub.length, ...(sub.length ? errorStats(sub) : { mae: null, bias: null }) };
+  });
+  season.bands = CALIBRATION_BANDS.map(([lo, hi]) => {
+    const sub = pool.filter((r) => r.proj >= lo && r.proj < hi);
+    return {
+      lo, hi, n: sub.length,
+      predicted: sub.length ? round(mean(sub.map((r) => r.proj)), 2) : null,
+      actual: sub.length ? round(mean(sub.map((r) => r.got)), 2) : null,
+    };
+  }).filter((b) => b.n > 0);
+
+  return { weeks, season, latest: weeks[weeks.length - 1], waiting: false };
+}
+
+/**
+ * Error over a set of (projection, outcome) pairs.
+ *
+ * `mae` and `bias` over everything are reported, but the headline pair is the
+ * one restricted to players actually projected to do something. Include the
+ * six hundred players projected nearly nil who then scored nearly nil and the
+ * average error collapses toward zero — a number that flatters the model by
+ * counting the easy cases six hundred times.
+ */
+function errorStats(pairs) {
+  const all = pairs.filter((r) => r.got != null);
+  const top = all.filter((r) => r.proj >= MEANINGFUL_PROJ);
+  const stat = (list) => (list.length ? {
+    mae: round(mean(list.map((r) => Math.abs(r.proj - r.got))), 2),
+    bias: round(mean(list.map((r) => r.proj - r.got)), 2),
+  } : { mae: null, bias: null });
+  const a = stat(all), t = stat(top);
+  return {
+    mae: a.mae, bias: a.bias,
+    maeTop: t.mae, biasTop: t.bias, nTop: top.length,
+    threshold: MEANINGFUL_PROJ,
+  };
+}
+
+/* ──────────────────────────── chip timing ──────────────────────────────── */
+
+/**
+ * When to play each chip.
+ *
+ * The whole value of a chip is in the week you pick, and that is decided months
+ * ahead by the fixture list: a blank is a club with no game, a double is a club
+ * with two. `snapshot.schedule` carries those counts for the rest of the
+ * season, which is far further than anything can be projected.
+ *
+ * So the advice comes in two grades, and the difference is labelled rather than
+ * blurred. **Inside the projection horizon** a week can be scored in points.
+ * **Beyond it** only the structure is known — how many of your fifteen blank,
+ * how many double — and claiming a points figure ten weeks out would be
+ * inventing one. `rated` says which grade a week got.
+ */
+const WILDCARD_WINDOW = 3;   // gameweeks of fixtures a wildcard week is judged on
+
+export function chipPlanner(ctx, opts = {}) {
+  if (!ctx.squad.length) return null;
+  const sched = ctx.snapshot.schedule;
+  const squad = ctx.squad.map((s) => s.player);
+  const from = ctx.gws[0];
+  const horizonEnd = ctx.gws[ctx.gws.length - 1];
+  const to = sched && sched.to ? Math.max(sched.to, horizonEnd) : horizonEnd;
+
+  /** Fixtures a club has that week, or null when the schedule does not reach. */
+  const games = (teamId, gw) => {
+    if (!sched || !sched.teams || !sched.teams[teamId]) return null;
+    if (gw < sched.from || gw > sched.to) return null;
+    return sched.teams[teamId][gw] || 0;
+  };
+
+  const weeks = [];
+  for (let gw = from; gw <= to; gw++) {
+    const idx = ctx.gws.indexOf(gw);
+    const rated = idx >= 0;
+    const blanks = [], doubles = [];
+    let known = 0;
+    for (const p of squad) {
+      const n = games(p.team, gw);
+      if (n == null) continue;
+      known += 1;
+      if (n === 0) blanks.push(p);
+      else if (n >= 2) doubles.push(p);
+    }
+
+    const w = {
+      gw, rated,
+      known,                       // how many of the fifteen the schedule covers
+      blanks, doubles,
+      blankCount: blanks.length,
+      doubleCount: doubles.length,
+      xiPoints: null, benchPoints: null, captainPoints: null, captain: null,
+    };
+
+    if (rated) {
+      const best = arrangeXI(squad, idx);
+      if (best) {
+        w.xiPoints = best.points;
+        w.benchPoints = round(best.bench.reduce((s, p) => s + (p.proj[idx] || 0), 0), 2);
+        const cap = best.xi.slice().sort((a, b) => (b.proj[idx] || 0) - (a.proj[idx] || 0))[0];
+        w.captain = cap || null;
+        w.captainPoints = cap ? round(cap.proj[idx] || 0, 2) : 0;
+      }
+    }
+    weeks.push(w);
+  }
+
+  // A normal week for THIS squad, which is what a bad week has to be bad against.
+  const scored = weeks.filter((w) => w.xiPoints != null);
+  const typical = scored.length
+    ? percentile(scored.map((w) => w.xiPoints).sort((a, b) => a - b), 50)
+    : null;
+
+  weeks.forEach((w) => {
+    // Bench Boost pays exactly what the bench projects — no modelling needed.
+    w.bboost = w.benchPoints;
+    // Triple Captain's marginal value over a normal captain is one more copy
+    // of the armband, not three.
+    w.tc = w.captainPoints;
+    // Free Hit is worth the size of the hole: how far below a normal week this
+    // one falls for the squad you actually own. Rating it against some
+    // theoretical best XI in the league would need a budget it does not have.
+    w.freehit = typical != null && w.xiPoints != null ? round(typical - w.xiPoints, 2) : null;
+    // Wildcard is not a one-week chip, so it is rated by the run that follows —
+    // and only where there is enough runway left to see one.
+    const idx = ctx.gws.indexOf(w.gw);
+    const runway = idx >= 0 ? ctx.gws.length - idx : 0;
+    // A FIXED three-week window, not "whatever is left". Averaging six weeks
+    // for one gameweek and three for another and then ranking them against each
+    // other compares two different questions.
+    w.wildcard = runway >= WILDCARD_WINDOW
+      ? round(mean(squad.map((p) => mean(p.fixtures.slice(idx, idx + WILDCARD_WINDOW)
+          .map((f) => (f.blank ? 4 : f.difficulty))))), 2)
+      : null;
+  });
+
+  /** The best week for one chip, with the runner-up for context. */
+  const rank = (key, dir, floor) => {
+    const list = weeks.filter((w) => w[key] != null && (floor == null || w[key] > floor))
+      .sort((a, b) => (dir === 'high' ? b[key] - a[key] : a[key] - b[key]));
+    return { best: list[0] || null, next: list[1] || null };
+  };
+
+  const structural = weeks.filter((w) => w.known > 0);
+  const blankWeeks = structural.filter((w) => w.blankCount > 0)
+    .sort((a, b) => b.blankCount - a.blankCount);
+  const doubleWeeks = structural.filter((w) => w.doubleCount > 0)
+    .sort((a, b) => b.doubleCount - a.doubleCount);
+
+  return {
+    weeks,
+    from, to,
+    horizonTo: horizonEnd,
+    typical: typical == null ? null : round(typical, 2),
+    blankWeeks, doubleWeeks,
+    // Nothing scheduled yet is a real answer, and a different one from "no good week".
+    scheduleKnown: !!(sched && sched.teams),
+    picks: {
+      bboost: rank('bboost', 'high'),
+      '3xc': rank('tc', 'high'),
+      // A Free Hit is only worth playing on a week that is actually bad.
+      freehit: rank('freehit', 'high', 0),
+      wildcard: rank('wildcard', 'high'),
+    },
   };
 }
 
