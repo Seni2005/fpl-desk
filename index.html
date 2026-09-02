@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FPL Desk</title>
 <meta name="description" content="Squad, prices, fixtures and transfer targets for Fantasy Premier League.">
-<meta name="build" content="14">
+<meta name="build" content="15">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0B0D0E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1120,6 +1120,129 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
   overflow:hidden}
 [data-mode="decision"] .pitch{border-radius:var(--card-r) var(--card-r) 0 0}
 
+/* ── your league ── */
+.ecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:1px;
+  background:var(--rule);border:var(--card-bd);margin-bottom:var(--stack)}
+.ecol,.capbox{background:var(--card-bg);padding:0 0 8px}
+[data-mode="analyst"] .ecol,[data-mode="analyst"] .capbox{background:var(--paper)}
+.capbox{border:var(--card-bd);margin-bottom:var(--stack)}
+.ehead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding:11px 14px;border-bottom:1px solid var(--rule);margin-bottom:4px}
+.esub{font-size:11.5px;color:var(--ink-3);text-align:right}
+.erow{display:grid;grid-template-columns:auto minmax(0,1fr) auto 64px 44px 46px 54px;
+  align-items:center;gap:8px;padding:0 14px;height:var(--row);font-size:13px}
+.etags{display:flex;gap:4px}
+.erow:hover{background:var(--paper-2)}
+.erow .who{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:13px;color:inherit}
+.erow.mine .who{color:var(--good)}
+/* The bar is the league share; the two figures beside it are that share and
+   FPL's global one, so the gap between them is readable at a glance. */
+.ebar{display:block;width:64px;height:8px;background:var(--paper-3);border:1px solid var(--rule)}
+.ebar i{display:block;height:100%;background:var(--ink-2)}
+.erow.mine .ebar i{background:var(--good)}
+.eshare{font-size:12px}
+.eglob{font-size:11px;color:var(--ink-3)}
+.erow .num small{font-size:.7em;opacity:.55}
+@media (max-width:560px){
+  .erow{grid-template-columns:auto minmax(0,1fr) auto 44px 54px;gap:6px}
+  .eglob,.ebar{display:none}
+}
+
+/* ── was it right? ── */
+#reviewCalls{border:var(--card-bd);background:var(--card-bg);margin-bottom:var(--stack)}
+[data-mode="analyst"] #reviewCalls{background:var(--paper)}
+.callhead{padding:10px 14px;border-bottom:1px solid var(--rule)}
+/* The status rule is a BORDER, never a box-shadow. `box-shadow: inset` still
+   reads as a shadow to the flatness audit, and the audit is right — this design
+   system has no shadows at all. Every row carries the border transparently so
+   the text never shifts by two pixels when a row turns good or bad. */
+.callrow{display:grid;grid-template-columns:112px minmax(0,1.1fr) minmax(0,1.4fr) 62px;
+  align-items:baseline;gap:12px;padding:9px 14px;border-bottom:1px solid var(--rule);
+  border-left:2px solid transparent}
+.callrow:last-child{border-bottom:none}
+.call-v{font-size:13.5px;font-weight:600;min-width:0}
+.call-d{font-size:12px;color:var(--ink-3);min-width:0}
+.call-n{justify-self:end;font-size:15px;font-weight:600;color:var(--ink-3)}
+.callrow.good .call-n{color:var(--good)} .callrow.bad .call-n{color:var(--badc)}
+.callrow.good{border-left-color:var(--good)}
+.callrow.bad{border-left-color:var(--badc)}
+.biasbox{border:var(--card-bd);background:var(--card-bg);padding:12px 14px;margin-bottom:var(--stack)}
+[data-mode="analyst"] .biasbox{background:var(--paper)}
+.biasrow{display:grid;grid-template-columns:44px minmax(0,1fr) 60px 46px;align-items:center;
+  gap:10px;height:var(--row)}
+.bp{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;color:var(--ink-2)}
+.btrack{position:relative;height:9px;background:var(--paper-3);border:1px solid var(--rule)}
+.btrack::before{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--ink-3)}
+.bfill{position:absolute;top:0;bottom:0;display:block}
+.bfill.over{background:var(--badc)} .bfill.under{background:var(--good)}
+.bv{justify-self:end;font-size:12.5px}
+.bn{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--ink-3);justify-self:end}
+@media (max-width:760px){
+  .callrow{grid-template-columns:1fr 62px;gap:3px 10px}
+  .call-d{grid-column:1/-1}
+  .call-n{grid-row:1;grid-column:2}
+}
+
+/* ── chip timing ── */
+#chipPicks{display:grid;gap:1px;background:var(--rule);border:var(--card-bd);margin-bottom:var(--stack)}
+.cpick{display:grid;grid-template-columns:170px 74px minmax(0,1fr) 96px;align-items:center;gap:12px;
+  background:var(--card-bg);padding:10px 14px}
+[data-mode="analyst"] .cpick{background:var(--paper)}
+.cp-name{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px}
+.cp-name i{font-style:normal;font-size:15px;line-height:1}
+.cp-when{font-family:"JetBrains Mono",monospace;font-size:12.5px;font-weight:600;letter-spacing:.04em;
+  color:var(--ink);border:1px solid var(--rule-2);padding:3px 8px;justify-self:start}
+button.cp-when:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.cp-when.dim{color:var(--ink-3);border-style:dashed}
+.cp-why{font-size:12px;color:var(--ink-3);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-val{justify-self:end;font-size:15px;font-weight:600}
+.cp-val small{opacity:.55;font-size:.66em;margin-left:2px}
+.cpick.spent{opacity:.45}
+#chipGrid td.rk{border-left:2px solid transparent}
+#chipGrid tr.bad td.rk{border-left-color:var(--badc)}
+#chipGrid tr.good td.rk{border-left-color:var(--good)}
+#chipGrid .far{font-style:normal;color:var(--ink-3);margin-left:5px}
+#chipGrid td.rk{white-space:nowrap}
+.chipgrid .read{padding-left:30px}
+@media (max-width:620px){
+  /* XI, bench and captain are the rated-week detail; on a phone the fixture
+     structure and the sentence beside it are what the section is for. */
+  .chipgrid th:nth-child(4),.chipgrid td:nth-child(4),
+  .chipgrid th:nth-child(5),.chipgrid td:nth-child(5),
+  .chipgrid th:nth-child(6),.chipgrid td:nth-child(6){display:none}
+  .chipgrid .read{padding-left:14px}
+}
+@media (max-width:760px){
+  .cpick{grid-template-columns:1fr auto;gap:4px 10px}
+  .cp-why{grid-column:1/-1;white-space:normal}
+  .cp-val{grid-row:1;grid-column:2}
+  .cp-when{grid-column:1}
+}
+
+/* ── your season ──
+   Totals are tiles, not a chart: "you have paid 24 points in hits" is a number,
+   and drawing a number is how a dashboard stops being read. */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:1px;background:var(--rule);border:var(--card-bd);margin-bottom:var(--stack)}
+.tile{background:var(--card-bg);padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+[data-mode="analyst"] .tile{background:var(--paper)}
+.tile .lab{font-size:9.5px}
+.tile b{font-family:"JetBrains Mono",monospace;font-size:23px;font-weight:600;letter-spacing:-.03em;
+  line-height:1.1;color:var(--ink)}
+.tile.good b{color:var(--good)} .tile.bad b{color:var(--badc)}
+.tile .tsub{font-size:11px;color:var(--ink-3)}
+.chartbox{margin:0 0 var(--stack);border:var(--card-bd);background:var(--card-bg);padding:12px 14px 4px}
+.chartbox figcaption{margin-bottom:6px}
+/* The bar fill lived under `.chart` only, so a bar in a `.scatter` frame fell
+   through to SVG's default black and vanished against the ground. */
+.scatter .cbar{fill:var(--ink)}
+.scatter .cbar:hover{fill:var(--ink-2)}
+.rankline{fill:none;stroke:var(--ink);stroke-width:2}
+.avgline{fill:none;stroke:var(--ink-3);stroke-width:2;stroke-dasharray:5 4}
+#seasonCharts .dot{fill:var(--ink);stroke:var(--card-bg);stroke-width:2}
+#seasonTable{margin-top:var(--stack)}
+
 /* ── the transfer screen ──
    Two panes: the squad you have and the market you can reach. A 1px rule is
    the only thing between them, because they are one decision, not two screens. */
@@ -1193,6 +1316,9 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
 .alt-top,.alt-bot{display:flex;align-items:center;gap:7px;min-width:0}
 .alt-top .who{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .alt-pos{font-family:"JetBrains Mono",monospace;font-size:9.5px;letter-spacing:.08em;color:var(--ink-3)}
+/* Penalty duty. A badge rather than a colour, because it is a fact about the
+   player and not a rating of him. */
+.tag.pen{background:var(--goodbg);color:var(--good);border:1px solid var(--goodline)}
 .alt-price{margin-left:auto;flex:none}
 .alt-bot .alt-why,.alt-bot .tag.block{flex:1 1 auto;min-width:0;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
@@ -1356,8 +1482,12 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
     <a href="#thisweek">This week</a>
     <a href="#squad">Squad</a>
     <a href="#planner">Planner</a>
+    <a href="#chiptiming">Chips</a>
+    <a href="#rivals">League</a>
     <a href="#matches">Matches</a>
     <a href="#changed">Changed</a>
+    <a href="#season" class="analyst-only">Season</a>
+    <a href="#review" class="analyst-only">Was it right?</a>
     <a href="#picks" class="analyst-only">Picks</a>
     <a href="#prices" class="analyst-only">Prices</a>
     <a href="#targets" class="analyst-only">Targets</a>
@@ -1410,6 +1540,34 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
     <div id="scorebug"></div>
     <div id="squadCard"><div class="loading">Loading&hellip;</div></div>
     <div class="key" id="fdrKey" hidden></div>
+  </section>
+
+  <section id="season" hidden>
+    <div class="head"><h2>Your season</h2><div class="meta" id="seasonNote"></div></div>
+    <div class="tiles" id="seasonTiles"></div>
+    <div id="seasonCharts"></div>
+    <div class="tw analyst-only" id="seasonTable"></div>
+  </section>
+
+  <section id="rivals" hidden>
+    <div class="head"><h2>Your league</h2><div class="meta" id="rivalNote"></div></div>
+    <div class="ecols" id="rivalCols"></div>
+    <div id="rivalCaps"></div>
+    <p class="caveat" id="rivalCaveat"></p>
+  </section>
+
+  <section id="review" hidden>
+    <div class="head"><h2>Was it right?</h2><div class="meta" id="reviewNote"></div></div>
+    <div id="reviewCalls"></div>
+    <div id="reviewCal"></div>
+    <p class="caveat" id="reviewCaveat"></p>
+  </section>
+
+  <section id="chiptiming" hidden>
+    <div class="head"><h2>When to play your chips</h2><div class="meta" id="chipNote"></div></div>
+    <div id="chipPicks"></div>
+    <div id="chipGrid"></div>
+    <p class="caveat" id="chipCaveat"></p>
   </section>
 
   <section id="planner" hidden>
@@ -1708,6 +1866,6 @@ tr:hover .sp.hi{fill:var(--up)} tr:hover .sp.nil{fill:var(--dn)}
      happily serve a cached index.html against a fresh js/, which is how you
      end up staring at an old page after a correct upload. Bump BUILD in both
      places when you ship, and the browser cannot get a mismatched pair. -->
-<script type="module" src="js/ui.js?v=14"></script>
+<script type="module" src="js/ui.js?v=15"></script>
 </body>
 </html>
