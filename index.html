@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FPL Desk</title>
 <meta name="description" content="Squad, prices, fixtures and transfer targets for Fantasy Premier League.">
-<meta name="build" content="15">
+<meta name="build" content="16">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0B0D0E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1725,10 +1725,20 @@ button.cp-when:hover{background:var(--ink);color:var(--paper);border-color:var(-
     <details>
       <summary>What progress means</summary>
       <div class="body">
-        FPL does not publish the thresholds that trigger a price change, so progress is an estimate: net transfers
-        this gameweek measured against how many managers own the player, scaled so 100% is roughly where a change
-        becomes likely. Past 100% a move is due, often that night. Ownership change is this gameweek's net transfers
-        as a share of all managers, in percentage points.
+        <b>Progress is FPL's own figure, not ours.</b> The game added an official price-change predictor for
+        2026/27 and publishes each player's progress toward a rise or a fall, updated through the day. This page
+        reads that number rather than estimating one, so it should agree with the predictor on the official site.
+        100% is the threshold: past it, a move is due at the next change, which lands at midnight UK time.
+        The <b>state</b> column carries FPL's own likelihood rating for tonight.
+        <br><br>
+        It used to be an estimate — net transfers measured against the player's own owner count — and that was
+        wrong in a way worth recording: dividing by ownership means a lightly-owned player crosses the line on a
+        handful of transfers while a template player never does, which is backwards. On a 2.5%-owned player it read
+        roughly ninety times too high. Where FPL has published no figure the progress column shows a dash rather
+        than falling back to that estimate: no number is better than one ninety times out.
+        <br><br>
+        Ownership change is this gameweek's net transfers as a share of all managers, in percentage points. Net
+        transfers are the raw counts FPL reports, and are ours to show either way.
       </div>
     </details>
   </section>
@@ -1866,6 +1876,6 @@ button.cp-when:hover{background:var(--ink);color:var(--paper);border-color:var(-
      happily serve a cached index.html against a fresh js/, which is how you
      end up staring at an old page after a correct upload. Bump BUILD in both
      places when you ship, and the browser cannot get a mismatched pair. -->
-<script type="module" src="js/ui.js?v=15"></script>
+<script type="module" src="js/ui.js?v=16"></script>
 </body>
 </html>
