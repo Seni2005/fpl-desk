@@ -1821,3 +1821,73 @@ test('no league, no rivals, or empty squads gives nothing rather than a wrong nu
   selectEntry(d, false);
   assert.equal(leagueEdge(d), null, 'and without your own squad there is nothing to compare');
 });
+
+/* ══════════════ FPL's price predictor, read rather than guessed ══════════ */
+
+import { priceOutlook } from '../js/engine.js';
+
+test('progress is FPL’s published figure, not an estimate of ours', () => {
+  const p = ctx.players.find((x) => Number.isFinite(x.pricePct));
+  assert.ok(p, 'the snapshot carries FPL’s figure');
+  assert.equal(p.progress, Math.round(p.pricePct), 'progress is that number, rounded');
+  assert.equal(p.progressSource, 'fpl');
+});
+
+test('the old owner-relative estimate no longer drives anything', () => {
+  // The bug this replaced: net transfers divided by the player's own owner
+  // count, so a lightly-owned player crossed the line on a handful of moves.
+  // Two players with identical published progress must read identically
+  // however different their ownership.
+  const a = { ...ctx.players[0], pricePct: 40, owned: 2.5, price_: { net: 140000, ratio: 0.68, band: 'rising' } };
+  const b = { ...ctx.players[1], pricePct: 40, owned: 45, price_: { net: 140000, ratio: 0.01, band: 'steady' } };
+  const oa = priceOutlook(a), ob = priceOutlook(b);
+  assert.equal(oa.pct, ob.pct, 'ownership does not bend the published progress');
+  assert.equal(oa.dir, ob.dir);
+});
+
+test('a snapshot without the predictor reports no progress rather than a wrong one', () => {
+  const snap = makeSnapshot();
+  snap.players.forEach((p) => { delete p.pricePct; delete p.priceProj; delete p.priceRate; });
+  const old = buildContext(snap);
+  const p = old.players[0];
+  assert.equal(p.progress, null, 'null, never a fabricated percentage');
+  assert.equal(p.progressSource, null);
+  const o = priceOutlook(p);
+  assert.equal(o.known, false);
+  assert.equal(o.pct, null);
+  assert.deepEqual(o.projections, [], 'and no forecast is invented either');
+  // The honest part survives: net transfers are a fact FPL reports directly.
+  assert.equal(o.net, p.net);
+});
+
+test('direction comes from the sign, for rises and for falls alike', () => {
+  const rise = priceOutlook({ pricePct: 75.2, priceProj: [{ d: 0, pct: 75.2, like: 3 }], net: 5 });
+  const fall = priceOutlook({ pricePct: -87.8, priceProj: [{ d: 0, pct: -87.8, like: -4 }], net: -5 });
+  assert.equal(rise.dir, 1);
+  assert.equal(fall.dir, -1, 'a negative percentage is a fall, not a small rise');
+  assert.equal(rise.over, false);
+  assert.equal(priceOutlook({ pricePct: 113.3, priceProj: [] }).over, true, 'past 100 is past the threshold');
+  assert.equal(priceOutlook({ pricePct: -106, priceProj: [] }).over, true, 'in both directions');
+});
+
+test('FPL’s likelihood is glossed but never invented', () => {
+  const o = priceOutlook({ pricePct: 113.3, priceProj: [{ d: 0, pct: 113.3, like: 5 }], net: 1 });
+  assert.equal(o.likelihood, 5, 'the raw rating travels with the word');
+  assert.equal(o.word, 'very likely');
+  const quiet = priceOutlook({ pricePct: 10.3, priceProj: [{ d: 0, pct: 10.3, like: 1 }], net: 1 });
+  assert.equal(quiet.word, 'unlikely', 'Dedic’s case: 10% progress is not a rise coming');
+  const none = priceOutlook({ pricePct: 40, priceProj: [{ d: 0, pct: 40, like: null }], net: 1 });
+  assert.equal(none.word, null, 'no rating means no word, not a guessed one');
+});
+
+test('the three-night forecast is carried through in order', () => {
+  const o = priceOutlook({
+    pricePct: 75.2, net: 1,
+    priceProj: [{ d: 0, pct: 75.2, like: 3 }, { d: 1, pct: 113.3, like: 5 }, { d: 2, pct: 151.4, like: 5 }],
+  });
+  assert.deepEqual(o.projections.map((x) => x.day), [0, 1, 2]);
+  assert.deepEqual(o.projections.map((x) => x.pct), [75.2, 113.3, 151.4]);
+  assert.equal(o.projections[1].dir, 1);
+  assert.equal(o.projections[2].word, 'very likely');
+  assert.equal(o.word, 'possible', 'the headline word is tonight’s, not the best of the three');
+});
