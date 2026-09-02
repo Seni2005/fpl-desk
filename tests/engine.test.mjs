@@ -1359,3 +1359,465 @@ test('the maxima still hold while the squad is short', () => {
   assert.match(shapeProblem({ GKP: 1, DEF: 5, MID: 2, FWD: 2 }), /not eleven/,
     'but it is once the squad is meant to be complete');
 });
+
+/* ══════════════════ set-piece duty and the season review ══════════════════ */
+
+import { setPieces, setPieceText, seasonReview, playerScores, SET_PIECE_ROUTINES } from '../js/engine.js';
+
+test('set-piece duty is read off the order FPL publishes', () => {
+  assert.deepEqual(setPieces({ pens: 1, fks: 2, corners: null }).map((r) => r.key), ['pens', 'fks']);
+  assert.equal(setPieces({ pens: 1 })[0].first, true);
+  assert.equal(setPieces({ pens: 2 })[0].first, false);
+  assert.deepEqual(setPieces({ pens: null, fks: null, corners: null }), []);
+  assert.deepEqual(setPieces({ pens: 5 }), [], 'fifth in line is not a set-piece taker');
+  assert.match(setPieceText({ pens: 1, corners: 2 }), /penalties \(1st\).*corners \(2nd\)/);
+});
+
+test('a penalty taker wears the badge, and it outranks the xG badges', () => {
+  const p = ctx.players.find((x) => x.pos !== 'GKP');
+  const taker = playerTraits({ ...p, pens: 1 }, 4);
+  assert.ok(taker.some((t) => t.key === 'pens'), 'the badge is there');
+  const idx = taker.findIndex((t) => t.key === 'pens');
+  const threat = taker.findIndex((t) => t.key === 'threat');
+  if (threat >= 0) assert.ok(idx < threat, 'and it leads the goal-threat badge');
+  assert.equal(taker.find((t) => t.key === 'pens').raw, 'first choice');
+});
+
+test('set-piece duty is shown but never scored', () => {
+  const p = ctx.players.find((x) => x.pos === 'MID');
+  const plain = playerScores(p, ctx);
+  const taker = playerScores({ ...p, pens: 1, fks: 1, corners: 1 }, ctx);
+  assert.deepEqual(taker, plain,
+    'the projection must not move — the xG already contains the penalties he has taken');
+});
+
+test('the market can be filtered to penalty takers', () => {
+  const all = slotOptions('MID', ctx, 100, []);
+  const marked = all.map((r, i) => (i % 7 === 0
+    ? { ...r, player: { ...r.player, pens: 1 } }
+    : { ...r, player: { ...r.player, pens: null, fks: null, corners: null } }));
+  const pens = finishMarket(marked, { setPiece: 'pens' });
+  assert.ok(pens.length, 'some takers found');
+  assert.ok(pens.every((r) => r.player.pens === 1));
+  assert.ok(pens.length < marked.length, 'and it actually narrowed the list');
+});
+
+/* ── the season ── */
+
+const seasonCtx = () => {
+  const c = buildContext(makeSnapshot());
+  c.snapshot.eventStats = [
+    { id: 1, average: 50, highest: 120 },
+    { id: 2, average: 40, highest: 110 },
+    { id: 3, average: 60, highest: 130 },
+  ];
+  c.entry.seasonHistory = [
+    { gw: 1, pts: 61, rank: 400000, total: 61, value: 100.0, bank: 1.5, transfers: 0, hit: 0, bench: 5 },
+    { gw: 2, pts: 44, rank: 350000, total: 101, value: 100.2, bank: 0.7, transfers: 2, hit: 4, bench: 12 },
+    { gw: 3, pts: 72, rank: 210000, total: 173, value: 100.9, bank: 0.3, transfers: 1, hit: 0, bench: 2 },
+  ];
+  return c;
+};
+
+test('the season is scored from the running total, not from the points label', () => {
+  const s = seasonReview(seasonCtx());
+  assert.equal(s.played, 3);
+  assert.equal(s.points, 173, 'the season total is what FPL says it is');
+  // GW2: the total moved 61 → 101, so the week netted 40 after a 4-point hit
+  const wk2 = s.weeks.find((w) => w.gw === 2);
+  assert.equal(wk2.net, 40, 'net is the change in the running total');
+  assert.equal(wk2.hit, 4);
+  assert.equal(wk2.gross, 44, 'and the gross is the net plus the hit back on');
+  assert.equal(s.weeks.reduce((a, w) => a + w.net, 0), 173, 'the weeks add up to the season');
+});
+
+test('the season counts the two numbers FPL never shows you', () => {
+  const s = seasonReview(seasonCtx());
+  assert.equal(s.hits, 4, 'points paid in hits');
+  assert.equal(s.hitCount, 1, 'in one week');
+  assert.equal(s.bench, 19, 'points left on the bench');
+  assert.equal(s.transfers, 3);
+});
+
+test('the season is compared against what the field scored', () => {
+  const s = seasonReview(seasonCtx());
+  assert.equal(s.weeks[0].vsAverage, 11, '61 against an average of 50');
+  assert.equal(s.weeks[1].vsAverage, 0, '40 against an average of 40 is level');
+  assert.equal(s.beat, 2, 'two weeks better than the field');
+  assert.equal(s.ratedWeeks, 3);
+  assert.equal(s.vsAverage, 23, '+11, 0, +12');
+});
+
+test('the season names the best and worst weeks and the rank swing', () => {
+  const s = seasonReview(seasonCtx());
+  assert.equal(s.best.gw, 3);
+  assert.equal(s.worst.gw, 2);
+  assert.equal(s.rank, 210000, 'the rank is the latest one');
+  assert.equal(s.bestRank, 210000);
+  assert.equal(s.worstRank, 400000);
+  assert.equal(s.valueGain, 0.9, 'value is measured from the first week on record');
+});
+
+test('a season with one round played, or none at all, is not an error', () => {
+  const one = buildContext(makeSnapshot());
+  one.snapshot.eventStats = [];
+  one.entry.seasonHistory = [{ gw: 1, pts: 61, rank: 400000, total: 61, value: 100, bank: 1.5 }];
+  const s = seasonReview(one);
+  assert.equal(s.played, 1);
+  assert.equal(s.points, 61);
+  assert.equal(s.vsAverage, null, 'no field data means no comparison, not a zero');
+  assert.equal(s.valueGain, 0, 'one week of value is no change');
+
+  const none = buildContext(makeSnapshot());
+  none.entry.seasonHistory = [];
+  assert.equal(seasonReview(none), null);
+});
+
+test('an older history without the new fields still reviews', () => {
+  const old = buildContext(makeSnapshot());
+  old.entry.seasonHistory = [
+    { gw: 1, pts: 61, rank: 400000, value: 100, bank: 1.5 },
+    { gw: 2, pts: 44, rank: 350000, value: 100.2, bank: 0.7 },
+  ];
+  const s = seasonReview(old);
+  assert.equal(s.played, 2);
+  assert.equal(s.points, 105, 'the total falls back to summing the weeks');
+  assert.equal(s.hits, 0);
+  assert.equal(s.bench, 0);
+});
+
+/* ═══════════════════════════ chip timing ════════════════════════════════ */
+
+import { chipPlanner } from '../js/engine.js';
+
+/** A schedule with a known blank week and a known double week. */
+function schedCtx() {
+  const c = buildContext(makeSnapshot());
+  const teams = {};
+  const ids = [...c.teams.keys()];
+  const blanking = ids.slice(0, 4);
+  for (const id of ids) {
+    teams[id] = {};
+    for (let g = c.gws[0]; g <= c.gws[0] + 9; g++) {
+      if (g === c.gws[0] + 7 && blanking.includes(id)) continue;        // blank
+      teams[id][g] = g === c.gws[0] + 9 && blanking.includes(id) ? 2 : 1; // double
+    }
+  }
+  c.snapshot.schedule = { from: c.gws[0], to: c.gws[0] + 9, teams };
+  return { ctx: c, blankGw: c.gws[0] + 7, doubleGw: c.gws[0] + 9, blanking };
+}
+
+test('the chip planner reads blanks and doubles from the schedule', () => {
+  const { ctx: c, blankGw, doubleGw } = schedCtx();
+  const p = chipPlanner(c);
+  assert.ok(p.blankWeeks.length, 'it found the blank week');
+  assert.equal(p.blankWeeks[0].gw, blankGw);
+  assert.ok(p.doubleWeeks.length, 'and the double');
+  assert.equal(p.doubleWeeks[0].gw, doubleGw);
+  const blank = p.weeks.find((w) => w.gw === blankGw);
+  assert.ok(blank.blanks.every((x) => x.team != null), 'blanking players are named');
+  assert.equal(blank.blankCount, blank.blanks.length);
+});
+
+test('weeks inside the horizon are scored, weeks beyond it are not', () => {
+  const { ctx: c } = schedCtx();
+  const p = chipPlanner(c);
+  const inside = p.weeks.filter((w) => w.rated);
+  const outside = p.weeks.filter((w) => !w.rated);
+  assert.ok(inside.length && outside.length, 'the fixture spans both grades');
+  assert.deepEqual(inside.map((w) => w.gw), c.gws, 'rated weeks are exactly the projection horizon');
+  for (const w of inside) {
+    assert.ok(w.xiPoints > 0, `GW${w.gw} has a projection`);
+    assert.ok(w.bboost != null && w.tc != null);
+  }
+  for (const w of outside) {
+    assert.equal(w.xiPoints, null, `GW${w.gw} claims no points it cannot know`);
+    assert.equal(w.bboost, null);
+    assert.equal(w.tc, null);
+    assert.ok(w.known > 0, 'but the fixture structure is still reported');
+  }
+});
+
+test('Bench Boost is worth exactly what the bench projects', () => {
+  const { ctx: c } = schedCtx();
+  const p = chipPlanner(c);
+  const w = p.picks.bboost.best;
+  assert.ok(w, 'a week was chosen');
+  const idx = c.gws.indexOf(w.gw);
+  const arr = arrangeXI(c.squad.map((s) => s.player), idx);
+  const bench = Math.round(arr.bench.reduce((s, q) => s + (q.proj[idx] || 0), 0) * 100) / 100;
+  assert.equal(w.bboost, bench, 'no modelling, just the bench');
+  for (const other of p.weeks.filter((x) => x.bboost != null)) {
+    assert.ok(w.bboost >= other.bboost, `GW${w.gw} is the best bench week`);
+  }
+});
+
+test('Triple Captain is the marginal armband, not the whole three', () => {
+  const { ctx: c } = schedCtx();
+  const p = chipPlanner(c);
+  const w = p.picks['3xc'].best;
+  const idx = c.gws.indexOf(w.gw);
+  const arr = arrangeXI(c.squad.map((s) => s.player), idx);
+  const top = Math.max(...arr.xi.map((q) => q.proj[idx] || 0));
+  assert.ok(Math.abs(w.tc - top) < 0.01, 'one more copy of the captain, not three');
+});
+
+test('Free Hit is only offered for a week that is actually bad', () => {
+  const { ctx: c } = schedCtx();
+  const p = chipPlanner(c);
+  assert.ok(p.typical > 0, 'a normal week for this squad is known');
+  for (const w of p.weeks.filter((x) => x.freehit != null)) {
+    assert.ok(Math.abs((p.typical - w.xiPoints) - w.freehit) < 0.02,
+      'the value is the gap below a normal week');
+  }
+  const pick = p.picks.freehit.best;
+  if (pick) assert.ok(pick.freehit > 0, 'never a week that is already better than usual');
+});
+
+test('every wildcard week is judged over the same window', () => {
+  const { ctx: c } = schedCtx();
+  const p = chipPlanner(c);
+  const rated = p.weeks.filter((w) => w.wildcard != null);
+  assert.ok(rated.length, 'some weeks have runway');
+  // Only weeks with at least three gameweeks of fixtures left may be rated —
+  // otherwise a three-week average is being ranked against a six-week one.
+  const lastRatable = c.gws[c.gws.length - 3];
+  assert.equal(rated[rated.length - 1].gw, lastRatable);
+  assert.ok(rated.every((w) => w.wildcard >= 1 && w.wildcard <= 5), 'and it is a difficulty');
+});
+
+test('a snapshot with no schedule still plans what it can', () => {
+  const c = buildContext(makeSnapshot());
+  delete c.snapshot.schedule;
+  const p = chipPlanner(c);
+  assert.equal(p.scheduleKnown, false, 'and says the schedule is missing');
+  assert.deepEqual(p.blankWeeks, [], 'no fixture counts means no blanks claimed');
+  assert.ok(p.weeks.every((w) => w.known === 0));
+  assert.ok(p.picks.bboost.best, 'the points-based chips still work off the projections');
+});
+
+test('no squad, no chip advice', () => {
+  const c = buildContext(makeSnapshot());
+  selectEntry(c, false);
+  assert.equal(chipPlanner(c), null);
+});
+
+/* ═════════════════════ scoring the advice afterwards ═════════════════════ */
+
+import { adviceReview, CALIBRATION_BANDS } from '../js/engine.js';
+
+/** A locked prediction for GW1 plus the actuals it should be scored against. */
+function reviewFixture(over = {}) {
+  const ids = ctx.squad.map((s) => s.id);
+  const preds = ctx.players.map((p) => [p.id, 4]);
+  const timeline = { players: {}, latestGw: 1 };
+  // Everyone actually scored 3, so the model was a point optimistic throughout.
+  ctx.players.forEach((p) => { timeline.players[String(p.id)] = { 1: [p.price, p.owned, 3, 3] }; });
+  const predictions = {
+    gws: {
+      1: {
+        at: '2026-08-21T09:00:00Z', deadline: '2026-08-21T17:30:00Z', locked: true,
+        rows: preds,
+        entries: {
+          [ctx.entry.key]: {
+            captain: ids[8], vice: ids[7], xi: ids.slice(0, 11), expected: 58, confidence: 'moderate',
+            transfer: { out: ids[14], in: ctx.players.find((p) => !ids.includes(p.id)).id, gain: 1.2 },
+            picks: ctx.squad.map((s, i) => [s.id, i + 1, i === 6 ? 2 : i < 11 ? 1 : 0]),
+            chip: null,
+            ...over.entry,
+          },
+        },
+        ...over.week,
+      },
+    },
+  };
+  return { predictions, timeline, ids };
+}
+
+test('only a locked gameweek is ever scored', () => {
+  const { predictions, timeline } = reviewFixture({ week: { locked: false } });
+  const r = adviceReview(predictions, timeline, ctx);
+  assert.equal(r.waiting, true, 'an open week is a prediction, not a result');
+  assert.deepEqual(r.weeks, []);
+});
+
+test('the model is scored on how close the projections came', () => {
+  const { predictions, timeline } = reviewFixture();
+  const w = adviceReview(predictions, timeline, ctx).latest;
+  assert.equal(w.gw, 1);
+  assert.equal(w.mae, 1, 'projected 4, they scored 3');
+  assert.equal(w.bias, 1, 'and a positive bias means optimistic');
+  assert.equal(w.n, ctx.players.length);
+});
+
+test('the headline error excludes the players nobody was ever unsure about', () => {
+  const { predictions, timeline } = reviewFixture();
+  // Half the pool projected at 0.5, and they all scored 0 — easy cases that
+  // would drag an all-players average toward zero.
+  predictions.gws[1].rows = ctx.players.map((p, i) => [p.id, i % 2 ? 0.5 : 4]);
+  ctx.players.forEach((p, i) => {
+    timeline.players[String(p.id)][1] = [p.price, p.owned, i % 2 ? 0 : 3, i % 2 ? 0 : 3];
+  });
+  const w = adviceReview(predictions, timeline, ctx).latest;
+  assert.ok(w.maeTop > w.mae, `the honest figure is worse (${w.maeTop} vs ${w.mae})`);
+  assert.equal(w.threshold, 2);
+  assert.ok(w.nTop < w.n, 'and it is measured over fewer players');
+});
+
+test('the captain call is scored against the man you actually picked', () => {
+  const { predictions, timeline, ids } = reviewFixture();
+  timeline.players[String(ids[8])][1] = [5, 5, 9, 9];    // ours scored 9
+  timeline.players[String(ids[6])][1] = [5, 5, 2, 2];    // yours scored 2
+  const w = adviceReview(predictions, timeline, ctx).latest;
+  assert.equal(w.captain.same, false);
+  assert.equal(w.captain.advised.pts, 9);
+  assert.equal(w.captain.yours.pts, 2);
+  assert.equal(w.captain.delta, 14, 'the armband doubles the gap, so 7 becomes 14');
+});
+
+test('captaining the same man is a nil difference, not a missing one', () => {
+  const { predictions, timeline, ids } = reviewFixture();
+  predictions.gws[1].entries[ctx.entry.key].captain = ids[6];
+  const w = adviceReview(predictions, timeline, ctx).latest;
+  assert.equal(w.captain.same, true);
+  assert.equal(w.captain.delta, 0);
+});
+
+test('the transfer call is scored, and whether you took it is knowable', () => {
+  const { predictions, timeline, ids } = reviewFixture();
+  const move = predictions.gws[1].entries[ctx.entry.key].transfer;
+  timeline.players[String(move.out)][1] = [5, 5, 1, 1];
+  timeline.players[String(move.in)][1] = [5, 5, 11, 11];
+  const w = adviceReview(predictions, timeline, ctx).latest;
+  assert.equal(w.transfer.delta, 10, 'the man coming in outscored the man going out by 10');
+  assert.equal(w.transfer.taken, false, 'and the squad shows it was not made');
+  assert.equal(w.transfer.out.id, ids[14]);
+});
+
+test('the reliability bands compare what was said with what happened', () => {
+  const { predictions, timeline } = reviewFixture();
+  predictions.gws[1].rows = ctx.players.map((p, i) => [p.id, i % 3 === 0 ? 1.5 : i % 3 === 1 ? 5 : 7]);
+  ctx.players.forEach((p, i) => {
+    const got = i % 3 === 0 ? 1 : i % 3 === 1 ? 6 : 6;
+    timeline.players[String(p.id)][1] = [p.price, p.owned, got, got];
+  });
+  const s = adviceReview(predictions, timeline, ctx).season;
+  assert.ok(s.bands.length >= 3, 'several bands have players in them');
+  for (const b of s.bands) {
+    assert.ok(b.n > 0, 'an empty band is dropped rather than drawn as a gap');
+    assert.ok(b.predicted >= b.lo && b.predicted < b.hi, 'the band average sits inside the band');
+    assert.ok(b.actual != null);
+  }
+  const mid = s.bands.find((b) => b.lo === 4);
+  assert.ok(mid && mid.actual > mid.predicted, 'the 4–6 band under-predicted, and it says so');
+  assert.deepEqual(CALIBRATION_BANDS[0], [0, 1]);
+});
+
+test('bias is broken out by position, because the model is not wrong evenly', () => {
+  const { predictions, timeline } = reviewFixture();
+  ctx.players.forEach((p) => {
+    const got = p.pos === 'DEF' ? 1 : 4;             // defenders flatter to deceive
+    timeline.players[String(p.id)][1] = [p.price, p.owned, got, got];
+  });
+  const s = adviceReview(predictions, timeline, ctx).season;
+  const def = s.byPos.find((r) => r.pos === 'DEF');
+  const mid = s.byPos.find((r) => r.pos === 'MID');
+  assert.equal(def.bias, 3, 'projected 4, they scored 1');
+  assert.equal(mid.bias, 0);
+  assert.ok(def.n > 0 && mid.n > 0);
+});
+
+test('an actual can be recovered from a running total when the week is missing', () => {
+  const { predictions, timeline } = reviewFixture();
+  const p = ctx.players[0];
+  // An old three-element row: only the season total, no gameweek figure.
+  timeline.players[String(p.id)] = { 1: [p.price, p.owned, 7] };
+  const r = adviceReview(predictions, timeline, ctx);
+  assert.ok(r.latest.n > 0, 'it still scores');
+});
+
+test('no predictions, or no timeline, is not an error', () => {
+  assert.equal(adviceReview(null, { players: {} }, ctx), null);
+  assert.equal(adviceReview({ gws: {} }, null, ctx), null);
+  assert.equal(adviceReview({ gws: {} }, { players: {} }, ctx).waiting, true);
+});
+
+/* ═══════════════════ the people you actually play ═══════════════════════ */
+
+import { leagueEdge } from '../js/engine.js';
+
+/** A twelve-man league whose squads overlap yours by varying amounts. */
+function leagueCtx(over = {}) {
+  const c = buildContext(makeSnapshot());
+  const mine = c.squad.map((s) => s.id);
+  const others = c.players.filter((p) => !mine.includes(p.id)).map((p) => p.id);
+  const managers = Array.from({ length: 12 }, (_, i) => {
+    // rival i owns the first (12 - i) of your players, then fills up elsewhere
+    const shared = mine.slice(0, 12 - i);
+    const rest = others.slice(i * 15, i * 15 + (15 - shared.length));
+    const picks = [...shared, ...rest].map((id, j) => ({ id, slot: j + 1, multiplier: j === 0 ? 2 : 1 }));
+    return { entry: 1000 + i, team: `Team ${i}`, manager: `M${i}`, rank: i + 2, total: 500 - i * 5,
+      picks, captain: i < 8 ? mine[0] : mine[3], chip: null };
+  });
+  c.entry.rivals = { leagueId: 51, leagueName: 'The Sunday League', gw: 1, size: 40, managers, ...over };
+  return { ctx: c, mine };
+}
+
+test('ownership is counted inside the league, not across the world', () => {
+  const { ctx: c, mine } = leagueCtx();
+  const e = leagueEdge(c);
+  assert.equal(e.covered, 12, 'and it says how many squads that was');
+  assert.equal(e.size, 40, 'without pretending to cover the whole league');
+
+  const first = e.squad.find((r) => r.player.id === mine[0]);
+  assert.equal(first.owners, 12, 'every rival owns your first player');
+  assert.equal(first.share, 100);
+  assert.equal(first.edge, Math.round((100 - first.global) * 10) / 10, 'the edge is league share minus global');
+
+  const last = e.squad.find((r) => r.player.id === mine[11]);
+  assert.equal(last.owners, 1, 'only one rival owns your twelfth');
+});
+
+test('a differential in here is not the same as a differential out there', () => {
+  const { ctx: c, mine } = leagueCtx();
+  const e = leagueEdge(c);
+  assert.ok(e.differentials.length, 'some of yours are rare in this league');
+  assert.ok(e.differentials.every((r) => r.owners <= 3), 'a quarter of twelve');
+  assert.ok(e.template.every((r) => r.owners >= 9), 'and template means three quarters of it');
+  assert.ok(e.squad.every((r) => r.yours), 'the squad list is your squad');
+  // Your last three players are owned by nobody in the league.
+  assert.ok(e.unique.every((r) => r.owners === 0));
+  assert.ok(e.unique.length >= 1, 'and there is at least one');
+});
+
+test('what they have that you do not is ranked by how many of them have it', () => {
+  const { ctx: c, mine } = leagueCtx();
+  const e = leagueEdge(c);
+  assert.ok(e.against.length, 'the league holds players you do not');
+  assert.ok(e.against.every((r) => !r.yours), 'none of them are yours');
+  for (let i = 1; i < e.against.length; i++) {
+    assert.ok(e.against[i - 1].owners >= e.against[i].owners, 'most-held first');
+  }
+});
+
+test('the armband spread is reported, because eight on one is a different week from four on three', () => {
+  const { ctx: c, mine } = leagueCtx();
+  const e = leagueEdge(c);
+  assert.equal(e.captainSpread, 2, 'two different men wore it');
+  assert.equal(e.topCaptain.player.id, mine[0]);
+  assert.equal(e.topCaptain.captains, 8, 'eight of twelve on the same man');
+  assert.equal(e.captains[1].captains, 4);
+});
+
+test('no league, no rivals, or empty squads gives nothing rather than a wrong number', () => {
+  const plain = buildContext(makeSnapshot());
+  assert.equal(leagueEdge(plain), null, 'no rivals fetched');
+
+  const { ctx: c } = leagueCtx();
+  c.entry.rivals.managers = [{ entry: 1, team: 'x', manager: 'y', picks: [], captain: null }];
+  assert.equal(leagueEdge(c), null, 'a rival with no picks is not a data point');
+
+  const { ctx: d } = leagueCtx();
+  selectEntry(d, false);
+  assert.equal(leagueEdge(d), null, 'and without your own squad there is nothing to compare');
+});
