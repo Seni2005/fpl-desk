@@ -78,6 +78,14 @@ export function makeSnapshot(opts = {}) {
         defCon: 5,
         tIn: Math.round(quality * 90000), tOut: Math.round((1 - quality) * 60000),
         price_: { net: 0, ratio: (quality - 0.5) * 0.2, band: 'steady' },
+        // FPL's published price-change progress, signed, 100 = threshold.
+        pricePct: Math.round((quality - 0.5) * 240 * 10) / 10,
+        priceRate: Math.round((quality - 0.5) * 10),
+        priceProj: [0, 1, 2].map((d) => ({
+          d,
+          pct: Math.round(((quality - 0.5) * 240 + d * 12) * 10) / 10,
+          like: quality > 0.9 ? 5 : quality > 0.7 ? 3 : 1,
+        })),
         fdr5: 3, fdr3: 3,
       });
     }
