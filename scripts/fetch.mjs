@@ -12,6 +12,12 @@ import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The engine is pure and DOM-free, which is exactly why the fetcher can use it:
+// the projection recorded in predictions.json is then the same number the page
+// will show, computed by the same code, rather than a second implementation
+// that could quietly drift from it.
+import * as engine from "../js/engine.js";
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const API = "https://fantasy.premierleague.com/api";
 const UA = "Mozilla/5.0 (compatible; fpl-desk/1.0; +https://github.com)";
@@ -20,15 +26,26 @@ const FIXTURE_HORIZON = 6; // gameweeks shown in the ticker
 const DETAIL_COUNT = 180;  // players we pull full season-by-season history for
 const DETAIL_CONCURRENCY = 5; // be a polite guest on someone else's API
 const LEAGUE_LIMIT = 8;    // private mini-leagues we pull standings for
+const RIVAL_LIMIT = 12;    // squads pulled from your biggest mini-league, once a gameweek
 
 async function get(path) {
   const url = `${API}${path}`;
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
       const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const e = new Error(`HTTP ${res.status}`);
+        // A 404 is an answer, not a failure to get one — a manager who joined
+        // the league after this gameweek simply has no picks for it. Retrying
+        // four times with backoff turns a dozen of those into two minutes of
+        // waiting for a result that will not change. 429 is the exception: that
+        // one genuinely means "come back later".
+        e.final = res.status >= 400 && res.status < 500 && res.status !== 429;
+        throw e;
+      }
       return await res.json();
     } catch (err) {
+      if (err.final) throw new Error(`${path} failed: ${err.message}`);
       if (attempt === 4) throw new Error(`${path} failed after 4 tries: ${err.message}`);
       const wait = 1500 * attempt;
       console.warn(`  retry ${attempt} for ${path} (${err.message}), waiting ${wait}ms`);
@@ -108,9 +125,18 @@ async function fetchEntry(team, current) {
       seasonHistory: (history.current || []).map((h) => ({
         gw: h.event,
         pts: h.points,
+        // `rank` has always meant the overall rank here; the gameweek's own
+        // rank is new and gets its own name rather than shifting the old one.
         rank: h.overall_rank,
+        gwRank: h.rank,
+        total: h.total_points,
         value: h.value / 10,
         bank: h.bank / 10,
+        transfers: h.event_transfers || 0,
+        // The two figures no FPL surface puts in front of you: what the hits
+        // cost and what you left on the bench.
+        hit: h.event_transfers_cost || 0,
+        bench: h.points_on_bench || 0,
       })),
       leagues: [],
     };
@@ -168,6 +194,136 @@ async function fetchEntry(team, current) {
     console.warn(`  entry ${id} failed: ${err.message}`);
     return { id, key: String(id), label: team.label || `Team ${id}`, error: err.message };
   }
+}
+
+/**
+ * The picks of the managers you are actually playing against.
+ *
+ * Global ownership tells you what the world holds; it does not tell you what
+ * the twelve people above you in your mini-league hold, which is the only
+ * ownership that moves your rank in the league you care about.
+ *
+ * Picks lock at the deadline and cannot change until the next one, so this is
+ * fetched ONCE PER GAMEWEEK and reused from the previous snapshot after that.
+ * Re-pulling a dozen squads every fifteen minutes through a match window would
+ * be a rude way to treat someone else's API for data that cannot have moved.
+ */
+async function fetchRivals(entry, prevSnapshot, gw) {
+  const leagues = (entry.leagues || []).filter((l) => l.type === "private" && l.standings.length > 1);
+  if (!leagues.length) return null;
+  // The biggest league you are in is the one whose rank you talk about.
+  const league = leagues.slice().sort((a, b) => (b.size || 0) - (a.size || 0))[0];
+
+  const prevEntry = ((prevSnapshot && prevSnapshot.entries) || [])
+    .find((e) => e.id === entry.id);
+  const cached = prevEntry && prevEntry.rivals;
+  if (cached && cached.gw === gw && cached.leagueId === league.id && cached.managers.length) {
+    console.log(`  rivals: reusing GW${gw} picks for ${league.name} (locked since the deadline)`);
+    return cached;
+  }
+
+  const rows = league.standings.filter((r) => !r.isMe).slice(0, RIVAL_LIMIT);
+  console.log(`  rivals: fetching ${rows.length} squads from ${league.name}…`);
+  const managers = [];
+  for (const r of rows) {
+    try {
+      const p = await get(`/entry/${r.entry}/event/${gw}/picks/`);
+      const picks = (p.picks || []).map((x) => ({
+        id: x.element, slot: x.position, multiplier: x.multiplier,
+      }));
+      const cap = (p.picks || []).find((x) => x.is_captain);
+      managers.push({
+        entry: r.entry, team: r.team, manager: r.manager, rank: r.rank, total: r.total,
+        picks, captain: cap ? cap.element : null, chip: p.active_chip || null,
+      });
+    } catch (err) {
+      // A manager who joined after this gameweek has no picks for it. That is
+      // not an error worth failing the run over.
+      console.warn(`    ${r.team} (${r.entry}) skipped: ${err.message}`);
+    }
+  }
+  if (!managers.length) return null;
+  return { leagueId: league.id, leagueName: league.name, gw, size: league.size, managers };
+}
+
+const PREDICTION_MIN_PROJ = 0.05; // below this a player is not really a prediction
+
+/**
+ * Record what the page is about to advise, before the deadline it applies to.
+ *
+ * A tool that tells you who to captain every week and never checks whether it
+ * was right is asking to be taken on faith. This writes the projection for
+ * every player for the gameweek ahead, plus the specific calls made for each
+ * manager and the squad they actually fielded, so that after the round both the
+ * model and the advice can be scored against `timeline.json` with no further
+ * API calls.
+ *
+ * The one rule that makes it worth anything: **a gameweek is written only while
+ * its deadline is still in the future.** Once the deadline passes the row is
+ * locked and later refreshes leave it alone. A "prediction" edited after kickoff
+ * is not a prediction, and a calibration built on those would flatter the model
+ * exactly where it matters most.
+ */
+function updatePredictions(prev, snapshot, engine) {
+  const log = prev && prev.gws ? prev : { gws: {} };
+  const next = snapshot.nextEvent;
+  if (!next || !next.deadline) return log;
+
+  const gw = String(next.id);
+  const now = new Date();
+  const passed = new Date(next.deadline) <= now;
+  const existing = log.gws[gw];
+
+  if (passed) {
+    if (existing && !existing.locked) {
+      existing.locked = true;
+      console.log(`  predictions: GW${gw} locked at the deadline`);
+    }
+    return log;
+  }
+  if (existing && existing.locked) return log;
+
+  const ctx = engine.buildContext(snapshot, {}, false);
+  const rows = [];
+  for (const p of ctx.players) {
+    const proj = p.proj && p.proj[0];
+    if (proj == null || proj < PREDICTION_MIN_PROJ) continue;
+    rows.push([p.id, Math.round(proj * 100) / 100]);
+  }
+
+  const entries = {};
+  for (const e of snapshot.entries || []) {
+    if (e.error || !e.picks || !e.picks.length) continue;
+    engine.selectEntry(ctx, e.key);
+    // The simulator is the slow part and adds nothing to a recorded number, so
+    // the recording skips it. The projection it would decorate is identical.
+    const a = engine.weeklyAdvice(ctx, { simulate: false });
+    if (!a) continue;
+    entries[e.key] = {
+      captain: a.captain ? a.captain.player.id : null,
+      vice: a.vice ? a.vice.player.id : null,
+      xi: a.xi.map((p) => p.id),
+      expected: a.expectedPoints,
+      confidence: a.confidence,
+      transfer: a.transfer ? { out: a.transfer.out.id, in: a.transfer.in.id, gain: a.transfer.perGw } : null,
+      // What you actually fielded, so the call can be scored against the choice
+      // rather than only against the outcome.
+      picks: e.picks.map((p) => [p.id, p.slot, p.multiplier]),
+      chip: e.activeChip || null,
+    };
+  }
+
+  log.gws[gw] = {
+    at: snapshot.generatedAt,
+    deadline: next.deadline,
+    locked: false,
+    rows,
+    entries,
+  };
+  log.updated = snapshot.generatedAt;
+  console.log(`  predictions: GW${gw} recorded — ${rows.length} projections, ` +
+    `${Object.keys(entries).length} manager call(s)`);
+  return log;
 }
 
 async function loadJson(name, fallback) {
@@ -299,7 +455,12 @@ function updateTimeline(prevTimeline, players, gw) {
   for (const p of players) {
     const key = String(p.id);
     if (!timeline.players[key]) timeline.players[key] = {};
-    timeline.players[key][String(gw)] = [p.price, p.owned, p.pts];
+    // Fourth element is the gameweek's OWN points. It could be differenced out
+    // of the running total, but only while no gameweek is ever missing from the
+    // series — and a refresh that fails on the one week you needed would give a
+    // wrong number rather than no number. Older rows have three elements and
+    // still read fine.
+    timeline.players[key][String(gw)] = [p.price, p.owned, p.pts, p.gwPts];
   }
   timeline.updated = new Date().toISOString();
   timeline.latestGw = gw;
@@ -323,6 +484,33 @@ function pricePressure(el, totalPlayers) {
   else if (ratio <= -0.075) band = "falling";
   else if (ratio <= -0.04) band = "cooling";
   return { net, ratio: round(ratio, 4), band };
+}
+
+/**
+ * Fixtures per club per remaining gameweek, for the whole rest of the season.
+ *
+ * The per-team fixture map only reaches six weeks, which is right for the
+ * ticker and useless for chips: blanks and doubles are announced months out and
+ * are the entire reason to hold a Free Hit. This is deliberately just counts —
+ * twenty clubs by thirty-odd gameweeks of small integers — so it costs almost
+ * nothing to carry.
+ *
+ * A fixture with no `event` is one the FA has pulled and not yet rescheduled.
+ * It is counted nowhere, which is exactly right: that is what makes a blank.
+ */
+function scheduleShape(fixtures, teams, fromEvent) {
+  const byTeam = {};
+  for (const t of teams) byTeam[t.id] = {};
+  let last = fromEvent;
+  for (const f of fixtures) {
+    if (f.event == null || f.event < fromEvent) continue;
+    if (f.event > last) last = f.event;
+    for (const id of [f.team_h, f.team_a]) {
+      if (!byTeam[id]) continue;
+      byTeam[id][f.event] = (byTeam[id][f.event] || 0) + 1;
+    }
+  }
+  return { from: fromEvent, to: last, teams: byTeam };
 }
 
 function buildFixtureIndex(fixtures, teams, fromEvent) {
@@ -369,6 +557,7 @@ async function main() {
   const prevSnapshot = await loadJson("snapshot.json", null);
   const prevTimeline = await loadJson("timeline.json", null);
   const prevPriceLog = await loadJson("prices.json", null);
+  const prevPredictions = await loadJson("predictions.json", null);
 
   console.log("Fetching bootstrap-static…");
   const boot = await get("/bootstrap-static/");
@@ -490,6 +679,13 @@ async function main() {
       xGI90: per90(el.expected_goal_involvements),
       xGC90: per90(el.expected_goals_conceded),
       defCon: el.defensive_contribution || 0,
+      // Set-piece duty. FPL publishes the order for each routine and it is the
+      // best cheap predictor in the dataset — a first-choice penalty taker at a
+      // decent side is worth more than most of the xG columns. 1 = first choice,
+      // null = not on the list.
+      pens: el.penalties_order,
+      fks: el.direct_freekicks_order,
+      corners: el.corners_and_indirect_freekicks_order,
       tIn: el.transfers_in_event || 0,
       tOut: el.transfers_out_event || 0,
       price_: pricePressure(el, totalPlayers),
@@ -505,7 +701,16 @@ async function main() {
   const entries = [];
   for (const team of teamList(config)) {
     const e = await fetchEntry(team, current);
-    if (e) entries.push(e);
+    if (!e) continue;
+    if (!e.error && current) {
+      try {
+        e.rivals = await fetchRivals(e, prevSnapshot, current.id);
+      } catch (err) {
+        console.warn(`  rivals for ${e.label} failed: ${err.message}`);
+        e.rivals = null;
+      }
+    }
+    entries.push(e);
   }
   if (!teamList(config).length) console.log("No teams in config.json — skipping squads.");
 
@@ -586,6 +791,16 @@ async function main() {
       .filter((e) => !e.finished)
       .slice(0, 14)
       .map((e) => ({ id: e.id, name: e.name, deadline: e.deadline_time })),
+    // Every round that has been scored, with what the field managed. This is
+    // what lets your season chart plot you against the average rather than
+    // against nothing.
+    eventStats: events
+      .filter((e) => e.finished && e.average_entry_score != null)
+      .map((e) => ({ id: e.id, average: e.average_entry_score, highest: e.highest_score || null })),
+    // How many fixtures each club has in each remaining gameweek. Two is a
+    // double, none is a blank, and both are the whole basis of chip timing —
+    // so this covers the rest of the season rather than the six-week ticker.
+    schedule: scheduleShape(fixtures, boot.teams, fromEvent),
     teams,
     fixtures: fixturesByTeam,
     players,
@@ -618,6 +833,12 @@ async function main() {
   await writeFile(join(ROOT, "data", "timeline.json"), JSON.stringify(timeline));
   const tkb = Math.round(JSON.stringify(timeline).length / 1024);
   console.log(`Wrote data/timeline.json (${tkb} KB, through GW${gwForHistory})`);
+
+  const predictions = updatePredictions(prevPredictions, snapshot, engine);
+  await writeFile(join(ROOT, "data", "predictions.json"), JSON.stringify(predictions));
+  const pkb = Math.round(JSON.stringify(predictions).length / 1024);
+  const recorded = Object.keys(predictions.gws || {}).length;
+  console.log(`Wrote data/predictions.json (${pkb} KB, ${recorded} gameweek(s) on record)`);
 
   const flagged = players.filter((p) => p.status !== "a").length;
   const rising = players.filter((p) => p.price_.band === "rising").length;
