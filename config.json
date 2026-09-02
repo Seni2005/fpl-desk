@@ -4,7 +4,7 @@
   "teams": [
     { "name": "Seni", "id": 3176331 },
     { "name": "Anthony", "id": 1169244 }
-    { "name": "Lessen", "id": 617178 }
+
   ],
 
   "_notes": "`name` is only the label on the chooser button, so use whatever you two call each other. Add more people by copying a line. With two or more listed the page asks who's looking each time it opens; with one it just loads that squad and never asks. Saving this file kicks off a refresh by itself, so squads appear a minute or two after you commit.",
