@@ -8,14 +8,28 @@ const TEAMS = Array.from({ length: 20 }, (_, i) => ({
 }));
 
 /** Difficulty is deterministic: club 1 has the easiest run, club 20 the hardest. */
+/**
+ * Opponents must VARY by gameweek as well as by club.
+ *
+ * This used to give every club the same opponent in every week — `(teamId % 20)
+ * + 1` ignores the gameweek entirely — so every fixture in the league was
+ * against the same handful of sides. Anything that rates a fixture by who is in
+ * it then had almost nothing to tell apart, which is how a difficulty scale
+ * meant to span five tiers came out using three.
+ */
 function fixturesFor(teamId, gws) {
-  return gws.map((gw) => ({
-    gw,
-    opp: (teamId % 20) + 1,
-    home: (gw + teamId) % 2 === 0,
-    d: 1 + ((teamId + gw) % 5),
-    ko: `2026-09-0${(gw % 9) + 1}T14:00:00Z`,
-  }));
+  return gws.map((gw) => {
+    // A rotation: each week every club faces a different one, and never itself.
+    let opp = ((teamId + gw * 7 - 1) % 20) + 1;
+    if (opp === teamId) opp = (opp % 20) + 1;
+    return {
+      gw,
+      opp,
+      home: (gw + teamId) % 2 === 0,
+      d: 1 + ((teamId + gw) % 5),
+      ko: `2026-09-0${(gw % 9) + 1}T14:00:00Z`,
+    };
+  });
 }
 
 function makeEntry(id, name, manager, order, pts) {
