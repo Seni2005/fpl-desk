@@ -1891,3 +1891,377 @@ test('the three-night forecast is carried through in order', () => {
   assert.equal(o.projections[2].word, 'very likely');
   assert.equal(o.word, 'possible', 'the headline word is tonight’s, not the best of the three');
 });
+
+/* ═══════════ the recommended lineup, and auto-picking one ═══════════════ */
+
+import { recommendedLineup, autoPickDiff, horizonKey } from '../js/engine.js';
+
+test('the recommended lineup is a legal eleven with an armband on it', () => {
+  const r = recommendedLineup(ctx, null, ctx.gws[0]);
+  assert.equal(r.gw, ctx.gws[0]);
+  assert.equal(r.xi.length, 11);
+  assert.equal(r.bench.length, 4);
+  assert.equal(shapeProblem(xiCounts(r.xi)), null, 'a shape FPL would accept');
+  assert.ok(r.captain && r.vice, 'both armbands are assigned');
+  assert.notEqual(r.captain.id, r.vice.id);
+  assert.ok(r.xi.some((p) => p.id === r.captain.id), 'and the captain is actually starting');
+  assert.ok(r.xi.some((p) => p.id === r.vice.id));
+  assert.equal(r.formation, formationName(xiCounts(r.xi)));
+});
+
+test('the captain is the best pick for that week, not for the run', () => {
+  const idx = 0;
+  const r = recommendedLineup(ctx, null, ctx.gws[idx], { weeks: 3 });
+  const best = r.xi.slice().sort((a, b) => (b.proj[idx] || 0) - (a.proj[idx] || 0))[0];
+  assert.equal(r.captain.id, best.id,
+    'the armband is a one-week bet even when the eleven is picked over three');
+  assert.equal(r.weeks, 3);
+  assert.match(r.basis, /3 gameweeks/);
+});
+
+test('the lineup reflects transfers staged in the plan for that week', () => {
+  const gw = ctx.gws[0];
+  const out = ctx.squad.find((s) => s.player.pos === 'MID');
+  const inc = ctx.players.find((p) => p.pos === 'MID' && !ctx.squad.some((s) => s.id === p.id));
+  const plan = { name: 'A', weeks: [{ gw, transfers: [{ out: out.id, in: inc.id }] }] };
+
+  const plain = recommendedLineup(ctx, null, gw);
+  const withPlan = recommendedLineup(ctx, plan, gw);
+  assert.equal(withPlan.fromPlan, true);
+  assert.equal(withPlan.staged.length, 1, 'the staged move is reported');
+
+  const pool = [...withPlan.xi, ...withPlan.bench].map((p) => p.id);
+  assert.ok(!pool.includes(out.id), 'the man being sold is not in the side');
+  assert.ok(pool.includes(inc.id), 'the man coming in is');
+  assert.ok(plain.xi.concat(plain.bench).some((p) => p.id === out.id),
+    'and without the plan he still is — so the difference is the plan, not chance');
+});
+
+test('a lineup for a week with empty slots reports them rather than pretending', () => {
+  const gw = ctx.gws[0];
+  const outs = ctx.squad.slice(0, 3).map((s) => s.id);
+  const plan = { name: 'A', weeks: [{ gw, transfers: outs.map((id) => ({ out: id, in: null })) }] };
+  const r = recommendedLineup(ctx, plan, gw);
+  assert.equal(r.holes.length, 3, 'the gaps are named');
+  assert.ok(r.xi.length <= 11);
+});
+
+test('an unknown gameweek gets no lineup rather than a wrong one', () => {
+  assert.equal(recommendedLineup(ctx, null, 999), null);
+  const none = buildContext(makeSnapshot());
+  selectEntry(none, false);
+  assert.equal(recommendedLineup(none, null, none.gws[0]), null);
+});
+
+test('auto-pick reports what it changed, including when that is nothing', () => {
+  const idx = 0;
+  const auto = recommendedLineup(ctx, null, ctx.gws[idx]);
+  const already = autoPickDiff(auto.xi, auto, idx);
+  assert.equal(already.same, true, 'picking the same eleven twice changes nothing');
+  assert.equal(already.changed, 0);
+
+  // A deliberately poor eleven: the lowest projections that still make a shape.
+  const squad = ctx.squad.map((s) => s.player);
+  const worst = arrangeXI(squad, idx, null, (p) => -((p.proj && p.proj[idx]) || 0));
+  const diff = autoPickDiff(worst.xi, auto, idx);
+  assert.ok(diff.changed > 0, `auto-pick would change ${diff.changed} players`);
+  assert.equal(diff.same, false);
+  assert.ok(diff.points > worst.xi.reduce((s, p) => s + (p.proj[idx] || 0), 0),
+    'and the eleven it picks projects more than the one it replaced');
+});
+
+test('the horizon key sums the weeks it is asked for and no others', () => {
+  const p = ctx.players[0];
+  const one = horizonKey(0, 1)(p), three = horizonKey(0, 3)(p);
+  assert.equal(one, p.proj[0]);
+  assert.ok(Math.abs(three - (p.proj[0] + p.proj[1] + p.proj[2])) < 1e-9);
+  assert.ok(three >= one, 'more weeks is never less total');
+});
+
+/* ═════════════ team ratings and a difficulty that means something ════════ */
+
+import { teamRatings, deskDifficulty } from '../js/engine.js';
+
+/** A context with a season of results behind it. */
+function playedCtx(rounds = 6) {
+  const c = buildContext(makeSnapshot());
+  const ids = [...c.teams.keys()];
+  const results = [];
+  for (let g = 1; g <= rounds; g++) {
+    for (let i = 0; i < ids.length; i += 2) {
+      let h = ids[(i + g) % ids.length], a = ids[(i + g + 1) % ids.length];
+      if (h === a) continue;
+      // Alternate the venue. Pairing by rotation alone gives some clubs nothing
+      // but home games, and a club with no away game has its away rating shrunk
+      // to exactly the league average — which collapses the spread the
+      // difficulty scale is supposed to find.
+      if (g % 2 === 0) { const t = h; h = a; a = t; }
+      // Each club gets its OWN strength on a continuum, not one of three
+      // buckets: with only a few distinct strengths the expected-goals values
+      // tie, the quintile cuts land on the same number, and tiers go unused.
+      const strong = (t) => 1 - (ids.indexOf(t) / (ids.length - 1)) * 2;   // +1 → −1
+      results.push({ gw: g, h, a,
+        hs: Math.max(0, Math.round(1.4 + (strong(h) - strong(a)) * 1.1)),
+        as: Math.max(0, Math.round(1.1 + (strong(a) - strong(h)) * 1.1)) });
+    }
+  }
+  c.snapshot.results = results;
+  return c;
+}
+
+test('the league table is built from results, and adds up', () => {
+  const c = playedCtx(6);
+  const r = teamRatings(c);
+  assert.ok(r.matches > 0);
+  for (const t of r.teams) {
+    assert.equal(t.all.p, t.all.w + t.all.d + t.all.l, `${t.short}: games played add up`);
+    assert.equal(t.points, t.all.w * 3 + t.all.d, 'and so do the points');
+    assert.equal(t.gd, t.all.gf - t.all.ga);
+    assert.equal(t.all.p, t.home.p + t.away.p, 'home and away split the season');
+    assert.equal(t.all.gf, t.home.gf + t.away.gf);
+  }
+  for (let i = 1; i < r.teams.length; i++) {
+    const a = r.teams[i - 1], b = r.teams[i];
+    assert.ok(a.points > b.points || (a.points === b.points && a.gd >= b.gd),
+      'and the table is ordered by points then goal difference');
+  }
+  assert.deepEqual(r.teams.map((t) => t.pos), r.teams.map((_, i) => i + 1));
+});
+
+test('good clubs rate above average and poor ones below', () => {
+  const c = playedCtx(8);
+  const r = teamRatings(c);
+  const ids = [...c.teams.keys()];
+  const good = r.byId.get(ids[0]), poor = r.byId.get(ids[ids.length - 1]);
+  assert.ok(good.att > poor.att, `attack separates them (${good.att} vs ${poor.att})`);
+  assert.ok(good.def > poor.def, `and so does defence (${good.def} vs ${poor.def})`);
+  assert.ok(r.reliable, 'eight rounds is enough to rate on');
+});
+
+test('ratings start near average and earn their way out', () => {
+  const one = teamRatings(playedCtx(1));
+  const many = teamRatings(playedCtx(12));
+  const ids = [...playedCtx(1).teams.keys()];
+  const spread = (r) => {
+    const v = r.teams.map((t) => t.att);
+    return Math.max(...v) - Math.min(...v);
+  };
+  assert.ok(spread(one) < spread(many),
+    `one round says less than twelve (${spread(one).toFixed(2)} vs ${spread(many).toFixed(2)})`);
+  assert.equal(one.reliable, false, 'and one round is explicitly not enough');
+  assert.ok(one.teams.every((t) => t.att > 0.4 && t.att < 2.2), 'no wild rating on a single game');
+});
+
+test('an unplayed season rates everyone at average rather than at nothing', () => {
+  const c = buildContext(makeSnapshot());
+  c.snapshot.results = [];
+  const r = teamRatings(c);
+  assert.equal(r.matches, 0);
+  assert.equal(r.reliable, false);
+  assert.ok(r.teams.every((t) => Math.abs(t.att - 1) < 1e-9), 'every attack is exactly average');
+  assert.ok(r.teams.every((t) => t.all.p === 0));
+});
+
+test('the difficulty scale spans one to five by construction', () => {
+  const c = playedCtx(8);
+  const d = deskDifficulty(c);
+  assert.ok(d.byKey.size > 0, 'every upcoming fixture is rated');
+  const tiers = [...d.byKey.values()].map((x) => x.d);
+  assert.deepEqual([...new Set(tiers)].sort(), [1, 2, 3, 4, 5], 'all five tiers are used');
+  const counts = [1, 2, 3, 4, 5].map((t) => tiers.filter((x) => x === t).length);
+  assert.ok(counts.every((n) => n > 0), `every tier has fixtures in it (${counts.join('/')})`);
+  // Even fifths are NOT promised and cannot be: expected goals against comes
+  // from a handful of rounded scorelines, so values tie, and a tie sitting on a
+  // cut has to fall on one side of it. What the quintile method does guarantee
+  // is that the cuts come from the data rather than from a threshold somebody
+  // eyeballed, and that all five tiers get used.
+  assert.equal(d.cuts.length, 4);
+  for (let i = 1; i < d.cuts.length; i++) assert.ok(d.cuts[i] > d.cuts[i - 1], 'cuts ascend');
+  assert.equal(d.graded, true, 'and the cuts are distinct enough to grade on');
+});
+
+test('a harder fixture means more goals expected against you', () => {
+  const c = playedCtx(8);
+  const d = deskDifficulty(c);
+  const rows = [...d.byKey.values()];
+  const easy = rows.filter((x) => x.d === 1), hard = rows.filter((x) => x.d === 5);
+  const mean1 = easy.reduce((s, x) => s + x.xGA, 0) / easy.length;
+  const mean5 = hard.reduce((s, x) => s + x.xGA, 0) / hard.length;
+  assert.ok(mean5 > mean1, `tier 5 concedes more than tier 1 (${mean5.toFixed(2)} vs ${mean1.toFixed(2)})`);
+  assert.ok(rows.every((x) => x.xGA > 0), 'and every rating is a real expected-goals figure');
+});
+
+test('the difficulty scale says when it is not ready to be believed', () => {
+  const early = deskDifficulty(playedCtx(1));
+  assert.equal(early.ready, false, 'one round is not a season');
+  const late = deskDifficulty(playedCtx(10));
+  assert.equal(late.ready, true);
+  assert.ok(early.byKey.size > 0, 'it still rates — it just says the sample is thin');
+});
+
+/* ═════════════════════════ the stats tables ═════════════════════════════ */
+
+import { matchResults, statRows, STAT_COLUMNS } from '../js/engine.js';
+
+test('the stats table sorts descending by default, largest first', () => {
+  for (const col of STAT_COLUMNS) {
+    const { rows } = statRows(ctx, { sort: col.key, limit: 40 });
+    const v = rows.map((p) => Number(p[col.key]) || 0);
+    for (let i = 1; i < v.length; i++) {
+      assert.ok(v[i - 1] >= v[i], `${col.key} descends (${v[i - 1]} then ${v[i]} at row ${i})`);
+    }
+  }
+});
+
+test('and ascending when asked, on the same column', () => {
+  const down = statRows(ctx, { sort: 'goals', dir: -1, limit: 20 });
+  const up = statRows(ctx, { sort: 'goals', dir: 1, limit: 20 });
+  assert.ok((Number(down.rows[0].goals) || 0) >= (Number(up.rows[0].goals) || 0));
+  const v = up.rows.map((p) => Number(p.goals) || 0);
+  for (let i = 1; i < v.length; i++) assert.ok(v[i - 1] <= v[i], 'ascending really ascends');
+});
+
+test('the stats table is about players who have played', () => {
+  const played = statRows(ctx, {});
+  assert.ok(played.rows.every((p) => p.mins > 0), 'nobody with no minutes by default');
+  const all = statRows(ctx, { playedOnly: false });
+  assert.ok(all.total >= played.total);
+});
+
+test('the stats table filters by position, club and name', () => {
+  const mids = statRows(ctx, { pos: 'MID' });
+  assert.ok(mids.rows.length && mids.rows.every((p) => p.pos === 'MID'));
+  const one = [...ctx.teams.keys()][0];
+  const club = statRows(ctx, { team: one });
+  assert.ok(club.rows.every((p) => p.team === one));
+  const named = statRows(ctx, { q: ctx.players[0].name.slice(0, 4) });
+  assert.ok(named.rows.length > 0);
+});
+
+test('results group by gameweek, newest first, with the clubs resolved', () => {
+  const c = playedCtx(5);
+  const r = matchResults(c);
+  assert.equal(r.rounds, 5);
+  assert.ok(r.total > 0);
+  for (let i = 1; i < r.gameweeks.length; i++) {
+    assert.ok(r.gameweeks[i - 1].gw > r.gameweeks[i].gw, 'newest round first');
+  }
+  for (const g of r.gameweeks) {
+    for (const m of g.matches) {
+      assert.ok(m.home.short && m.away.short, 'both clubs are named, not left as ids');
+      assert.equal(m.goals, m.hs + m.as);
+      assert.equal(m.result, m.hs > m.as ? 'H' : m.hs < m.as ? 'A' : 'D');
+    }
+    assert.equal(g.goals, g.matches.reduce((s, m) => s + m.goals, 0));
+  }
+});
+
+test('a season with no results is an empty list, not an error', () => {
+  const c = buildContext(makeSnapshot());
+  c.snapshot.results = [];
+  const r = matchResults(c);
+  assert.equal(r.total, 0);
+  assert.deepEqual(r.gameweeks, []);
+  delete c.snapshot.results;
+  assert.equal(matchResults(c).total, 0);
+});
+
+/* ═════════════ choosing which difficulty scale the model runs on ═════════ */
+
+import { applyDifficulty, difficultyAudit, FDR_SOURCES } from '../js/engine.js';
+
+test('a fresh season stays on FPL — a scale built from no results is noise', () => {
+  const c = buildContext(makeSnapshot());
+  assert.equal(c.fdr.source, 'auto');
+  assert.equal(c.fdr.active, 'fpl');
+  assert.equal(c.fdr.ready, false);
+  const f = c.snapshot.fixtures[[...c.teams.keys()][0]][0];
+  assert.equal(f.d, f.fplD, 'the live value is FPL’s');
+});
+
+test('auto hands over to Desk once the clubs have played enough', () => {
+  const played = playedCtx(8);
+  const c = buildContext(played.snapshot);
+  assert.equal(c.fdr.active, 'desk');
+  assert.ok(c.fdr.ready, 'and says so');
+  const list = c.snapshot.fixtures[[...c.teams.keys()][0]];
+  const scored = list.filter((f) => f.deskD != null);
+  assert.ok(scored.length, 'fixtures carry a Desk rating');
+  assert.ok(scored.every((f) => f.d === f.deskD), 'and the live value is it');
+  assert.ok(scored.every((f) => f.fplD != null), 'with FPL’s kept beside it');
+  assert.ok(scored.every((f) => f.xGA > 0), 'and the goals figure it came from');
+});
+
+test('pinning a scale overrides the automatic choice in both directions', () => {
+  const played = playedCtx(8).snapshot;
+  const pinFpl = buildContext(played, {}, null, { fdr: 'fpl' });
+  assert.equal(pinFpl.fdr.active, 'fpl');
+  const one = pinFpl.snapshot.fixtures[[...pinFpl.teams.keys()][0]][0];
+  assert.equal(one.d, one.fplD);
+
+  const fresh = makeSnapshot();
+  const pinDesk = buildContext(fresh, {}, null, { fdr: 'desk' });
+  assert.equal(pinDesk.fdr.active, 'desk');
+  // Asked for before it is earned: allowed, but it says it is not trusted.
+  assert.equal(pinDesk.fdr.trusted, false);
+});
+
+test('an unknown scale name falls back to auto rather than blanking difficulty', () => {
+  const c = buildContext(makeSnapshot(), {}, null, { fdr: 'nonsense' });
+  assert.equal(c.fdr.source, 'auto');
+  const f = c.snapshot.fixtures[[...c.teams.keys()][0]][0];
+  assert.ok(f.d >= 1 && f.d <= 5);
+});
+
+test('the scale reaches the projections, not just the chips', () => {
+  const played = playedCtx(8).snapshot;
+  const fpl = buildContext(JSON.parse(JSON.stringify(played)), {}, null, { fdr: 'fpl' });
+  const desk = buildContext(JSON.parse(JSON.stringify(played)), {}, null, { fdr: 'desk' });
+  const a = fpl.players.map((p) => p.proj.reduce((s, x) => s + x, 0));
+  const b = desk.players.map((p) => p.proj.reduce((s, x) => s + x, 0));
+  assert.ok(a.some((v, i) => Math.abs(v - b[i]) > 0.01),
+    'switching the scale moves the points, or it is only decoration');
+});
+
+test('applying a scale twice is idempotent — FPL’s original is never overwritten', () => {
+  const c = buildContext(playedCtx(8).snapshot, {}, null, { fdr: 'desk' });
+  const f = c.snapshot.fixtures[[...c.teams.keys()][0]][0];
+  const originalFpl = f.fplD;
+  applyDifficulty(c, 'desk');
+  applyDifficulty(c, 'fpl');
+  applyDifficulty(c, 'desk');
+  assert.equal(f.fplD, originalFpl, 'FPL’s number survives every switch');
+});
+
+test('every offered scale is one applyDifficulty accepts', () => {
+  const c = buildContext(playedCtx(8).snapshot);
+  for (const s of FDR_SOURCES) {
+    const r = applyDifficulty(c, s.key);
+    assert.equal(r.source, s.key);
+    assert.ok(r.active === 'fpl' || r.active === 'desk');
+    assert.ok(s.label && s.title, `${s.key} explains itself`);
+  }
+});
+
+test('the audit lays both scales side by side and scores the agreement', () => {
+  const c = buildContext(playedCtx(8).snapshot);
+  const a = difficultyAudit(c);
+  assert.equal(a.rows.length, c.teams.size, 'every club is in the table');
+  assert.ok(a.compared > 0);
+  assert.ok(a.agree >= 0 && a.agree <= 100);
+  assert.ok(a.within1 >= a.agree, 'within one is at least as common as exact');
+  assert.ok(a.avgGap >= 0);
+  for (const r of a.rows) {
+    assert.equal(r.cells.length, a.gws.length);
+    if (r.gap != null) assert.ok(Math.abs(r.gap - (r.deskAvg - r.fplAvg)) < 0.02);
+  }
+  // Sorted by disagreement, because agreement is not the interesting row.
+  for (let i = 1; i < a.rows.length; i++) {
+    assert.ok(Math.abs(a.rows[i - 1].gap || 0) >= Math.abs(a.rows[i].gap || 0));
+  }
+});
+
+test('the audit is honest about a season too young to rate', () => {
+  const a = difficultyAudit(buildContext(makeSnapshot()));
+  assert.equal(a.ready, false);
+});
