@@ -125,7 +125,7 @@ export function percentile(sorted, p) {
  * here depends on it, so switching later goes through `selectEntry` instead of
  * calling this again.
  */
-export function buildContext(snapshot, details = {}, team = null) {
+export function buildContext(snapshot, details = {}, team = null, opts = {}) {
   const gwPlayed = snapshot.currentEvent ? snapshot.currentEvent.id : 1;
   const from = snapshot.horizonFrom || gwPlayed + 1;
   const horizon = Math.min(snapshot.horizon || 6, 6);
@@ -135,6 +135,11 @@ export function buildContext(snapshot, details = {}, team = null) {
   const byId = new Map();
   const teams = new Map();
   (snapshot.teams || []).forEach((t) => teams.set(t.id, t));
+
+  // Difficulty is settled BEFORE any projection is computed, because every
+  // projection below is scaled by it. Doing this afterwards would leave the
+  // chips on one scale and the points under them on another.
+  const fdr = applyDifficulty({ snapshot, teams }, opts.fdr || 'auto');
 
   const players = (snapshot.players || []).map((raw) => {
     const p = { ...raw };
@@ -171,7 +176,7 @@ export function buildContext(snapshot, details = {}, team = null) {
     : snapshot.entry ? [snapshot.entry] : [];
 
   const ctx = {
-    snapshot, details, players, byId, teams, gws, gwPlayed, horizon,
+    snapshot, details, players, byId, teams, gws, gwPlayed, horizon, fdr,
     totalManagers: snapshot.totalManagers || 1,
     entries,
     entry: null,
@@ -543,6 +548,361 @@ export function optimalXI(squadPlayers, gwIndex = 0, key = null) {
   best.captain = best.xi.slice().sort((a, b) => value(b) - value(a))[0] || null;
   best.vice = best.xi.slice().sort((a, b) => value(b) - value(a))[1] || null;
   return best;
+}
+
+/* ────────────────── team ratings, measured from results ────────────────── */
+
+/**
+ * How much a rating is allowed to move on a small sample.
+ *
+ * With two games played, a club that has scored six goals has not proved it is
+ * three times the league average — it has played two games. Every rate is
+ * shrunk toward the league mean as though `SHRINK` average games sat behind it,
+ * so early-season ratings start near 1.00 and earn their way out. Without this
+ * the difficulty scale in August is mostly noise wearing a number.
+ */
+const SHRINK = 4;
+
+/**
+ * The league table, and attack and defence strength, from matches actually
+ * played.
+ *
+ * Rates are expressed against the league average, so 1.00 is average, 1.40 is
+ * forty per cent better than average, and the numbers stay comparable as the
+ * season's scoring rate drifts. Home and away are kept apart because they are
+ * genuinely different — the gap is worth roughly a fifth of a goal a game.
+ */
+export function teamRatings(ctx) {
+  const results = (ctx.snapshot && ctx.snapshot.results) || [];
+  const teams = [...ctx.teams.values()];
+  const blank = () => ({ p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, cs: 0, fail: 0 });
+  const rows = new Map(teams.map((t) => ({
+    id: t.id, name: t.name, short: t.short,
+    all: blank(), home: blank(), away: blank(),
+    form: [],                                   // most recent last
+  })).map((r) => [r.id, r]));
+
+  for (const m of results) {
+    const h = rows.get(m.h), a = rows.get(m.a);
+    if (!h || !a) continue;
+    const add = (row, side, gf, ga) => {
+      for (const b of [row.all, side]) {
+        b.p += 1; b.gf += gf; b.ga += ga;
+        if (gf > ga) b.w += 1; else if (gf === ga) b.d += 1; else b.l += 1;
+        if (ga === 0) b.cs += 1;
+        if (gf === 0) b.fail += 1;
+      }
+      row.form.push(gf > ga ? 'W' : gf === ga ? 'D' : 'L');
+    };
+    add(h, h.home, m.hs, m.as);
+    add(a, a.away, m.as, m.hs);
+  }
+
+  const played = results.length;
+  // League averages per match side. With no results at all everything is 1.00
+  // and every rating is explicitly unproven.
+  const totalGoals = results.reduce((s, m) => s + m.hs + m.as, 0);
+  const avgHome = played ? results.reduce((s, m) => s + m.hs, 0) / played : 1.4;
+  const avgAway = played ? results.reduce((s, m) => s + m.as, 0) / played : 1.15;
+  const avgAll = played ? totalGoals / (played * 2) : 1.275;
+
+  /** A per-game rate shrunk toward the league mean by SHRINK notional games. */
+  const rate = (goals, games, mean) =>
+    round((goals + SHRINK * mean) / (games + SHRINK) / (mean || 1), 3);
+
+  const out = [];
+  for (const r of rows.values()) {
+    const t = ctx.teams.get(r.id) || {};
+    out.push({
+      ...r,
+      points: r.all.w * 3 + r.all.d,
+      gd: r.all.gf - r.all.ga,
+      // Attack: goals scored per game against the league's. Defence: goals
+      // conceded — INVERTED, so higher is always better on both.
+      att: rate(r.all.gf, r.all.p, avgAll),
+      def: round(1 / Math.max(0.2, rate(r.all.ga, r.all.p, avgAll)), 3),
+      attHome: rate(r.home.gf, r.home.p, avgHome),
+      attAway: rate(r.away.gf, r.away.p, avgAway),
+      defHome: round(1 / Math.max(0.2, rate(r.home.ga, r.home.p, avgAway)), 3),
+      defAway: round(1 / Math.max(0.2, rate(r.away.ga, r.away.p, avgHome)), 3),
+      form5: r.form.slice(-5),
+      // FPL's own pre-season strength ratings, kept for comparison rather than
+      // used — they are set in July and barely move.
+      fplAtt: t.atkH == null ? null : Math.round(((t.atkH || 0) + (t.atkA || 0)) / 2),
+      fplDef: t.defH == null ? null : Math.round(((t.defH || 0) + (t.defA || 0)) / 2),
+    });
+  }
+  out.sort((x, y) => y.points - x.points || y.gd - x.gd || y.all.gf - x.all.gf);
+  out.forEach((r, i) => { r.pos = i + 1; });
+
+  return {
+    teams: out,
+    byId: new Map(out.map((r) => [r.id, r])),
+    matches: played,
+    // Games behind the AVERAGE club — the honest description of the sample.
+    perTeam: teams.length ? round((played * 2) / teams.length, 1) : 0,
+    avgHome: round(avgHome, 2), avgAway: round(avgAway, 2), avgAll: round(avgAll, 2),
+    shrink: SHRINK,
+    // Below this, say so rather than dressing noise as a rating.
+    reliable: played >= teams.length * 2,
+  };
+}
+
+/**
+ * Our own fixture difficulty, from how the two clubs have actually played.
+ *
+ * FPL's 1–5 rating is set before a ball is kicked and barely moves all season,
+ * which makes it a statement about reputation rather than about the fixture.
+ * This is expected goals against you — the opponent's attack times your
+ * defence, at the right venue — mapped onto the same 1–5 so the two can be read
+ * side by side.
+ *
+ * The mapping is by QUINTILE across every remaining fixture, so the scale
+ * always spans 1 to 5 and a 5 means "the hardest fifth of what is left" rather
+ * than an absolute anyone would have to calibrate by eye.
+ */
+export function deskDifficulty(ctx, ratings) {
+  const r = ratings || teamRatings(ctx);
+  const raw = [];
+
+  const expectedAgainst = (teamId, oppId, home) => {
+    const me = r.byId.get(teamId), opp = r.byId.get(oppId);
+    if (!me || !opp) return null;
+    // Goals you would expect to concede: their attack at this venue, against
+    // your defence at it, scaled by the league's rate for that venue.
+    const base = home ? r.avgAway : r.avgHome;
+    const oppAtt = home ? opp.attAway : opp.attHome;
+    const myDef = home ? me.defHome : me.defAway;
+    return base * oppAtt / Math.max(0.2, myDef);
+  };
+
+  for (const [teamId, fixtures] of Object.entries(ctx.snapshot.fixtures || {})) {
+    for (const f of fixtures) {
+      const v = expectedAgainst(Number(teamId), f.opp, f.home);
+      if (v != null) raw.push({ team: Number(teamId), gw: f.gw, opp: f.opp, home: f.home, v });
+    }
+  }
+  if (!raw.length) return { byKey: new Map(), cuts: [], ready: false, ratings: r };
+
+  const sorted = raw.map((x) => x.v).sort((a, b) => a - b);
+  // percentile() takes a fraction, not a number out of a hundred — passing 20
+  // clamps to the top of the list and every cut collapses onto the maximum.
+  const cuts = [0.2, 0.4, 0.6, 0.8].map((q) => percentile(sorted, q));
+  const tier = (v) => (v <= cuts[0] ? 1 : v <= cuts[1] ? 2 : v <= cuts[2] ? 3 : v <= cuts[3] ? 4 : 5);
+
+  const byKey = new Map();
+  raw.forEach((x) => {
+    byKey.set(`${x.team}:${x.gw}:${x.opp}`, {
+      ...x, d: tier(x.v), xGA: round(x.v, 2),
+    });
+  });
+  // Cuts that are not strictly increasing mean the underlying values are too
+  // tied to split into fifths — a "1 to 5" scale that only ever returns three
+  // numbers would be a lie about its own resolution.
+  const graded = cuts.every((c, i) => i === 0 || c > cuts[i - 1]);
+  return {
+    byKey, cuts: cuts.map((c) => round(c, 2)),
+    graded,
+    // The scale is only worth showing once the clubs have played enough to rate.
+    ready: r.reliable && graded,
+    ratings: r,
+  };
+}
+
+/** What the three difficulty settings mean, in the order they are offered. */
+export const FDR_SOURCES = [
+  { key: 'auto', label: 'Auto', title: "FPL's rating until the clubs have played enough to rate, then Desk's." },
+  { key: 'fpl', label: 'FPL', title: "FPL's own 1–5, set before the season and rarely changed." },
+  { key: 'desk', label: 'Desk', title: 'Goals we would expect you to concede, from results so far, cut into fifths.' },
+];
+
+/**
+ * Choose which difficulty scale the whole model runs on, and write it in.
+ *
+ * Every consumer — projections, the fixture matrix, the ticker, fixture swings —
+ * reads `f.d`. So the switch happens once, here, by rewriting that field and
+ * keeping both originals beside it. A difficulty scale that recoloured the chips
+ * but left the projections on FPL's July guess would be decoration, and the
+ * chips and the numbers underneath them would quietly disagree.
+ *
+ * `auto` is the default and resolves to Desk once the clubs have played enough
+ * for the ratings to mean anything (two games a side) and the fixtures spread
+ * across five distinct tiers. Before that it stays on FPL's, because a scale
+ * built from one round of results is noise wearing a number.
+ *
+ * The fetcher applies the same rule before it writes predictions.json, so the
+ * logged forecast and the page agree by construction rather than by luck.
+ */
+export function applyDifficulty(ctx, source = 'auto') {
+  const desk = deskDifficulty(ctx);
+  const wanted = FDR_SOURCES.some((s) => s.key === source) ? source : 'auto';
+  const active = wanted === 'desk' || (wanted === 'auto' && desk.ready) ? 'desk' : 'fpl';
+  // Asking for Desk before it is ready is allowed — it is the user's own view of
+  // their own tool — but the fact that it is unproven travels with the answer.
+  const trusted = active === 'fpl' || desk.ready;
+
+  Object.entries(ctx.snapshot.fixtures || {}).forEach(([tid, list]) => {
+    (list || []).forEach((f) => {
+      if (f.fplD == null) f.fplD = f.d;
+      const hit = desk.byKey.get(`${Number(tid)}:${f.gw}:${f.opp}`);
+      f.deskD = hit ? hit.d : null;
+      f.xGA = hit ? hit.xGA : null;
+      f.d = active === 'desk' && f.deskD != null ? f.deskD : f.fplD;
+    });
+  });
+
+  ctx.fdr = { source: wanted, active, ready: desk.ready, trusted, desk };
+  return ctx.fdr;
+}
+
+/**
+ * The two difficulty scales, club by club, so the disagreement is inspectable.
+ *
+ * "Is the difficulty scale accurate?" is not a question anyone should have to
+ * take on trust. This lays FPL's rating and ours beside each other over the
+ * horizon and reports how often they agree, so the answer is something you can
+ * look at rather than something the tool asserts about itself.
+ */
+export function difficultyAudit(ctx, weeks = 6) {
+  const gws = ctx.gws.slice(0, weeks);
+  const desk = (ctx.fdr && ctx.fdr.desk) || deskDifficulty(ctx);
+  const rows = [];
+  let same = 0, near = 0, n = 0, spread = 0;
+
+  ctx.teams.forEach((t) => {
+    const list = ((ctx.snapshot.fixtures || {})[t.id] || []).filter((f) => gws.includes(f.gw));
+    const cells = gws.map((gw) => {
+      const g = list.filter((f) => f.gw === gw);
+      if (!g.length) return { gw, blank: true };
+      const pick = (k) => mean(g.map((f) => (f[k] == null ? null : f[k])).filter((v) => v != null));
+      const hit = g.map((f) => desk.byKey.get(`${t.id}:${f.gw}:${f.opp}`)).filter(Boolean);
+      return {
+        gw, blank: false, games: g,
+        fpl: g.length ? round(pick('fplD') || pick('d'), 1) : null,
+        desk: hit.length ? round(mean(hit.map((h) => h.d)), 1) : null,
+        xGA: hit.length ? round(mean(hit.map((h) => h.xGA)), 2) : null,
+      };
+    });
+    cells.forEach((c) => {
+      if (c.blank || c.fpl == null || c.desk == null) return;
+      const gap = Math.abs(c.desk - c.fpl);
+      n += 1; spread += gap;
+      if (gap < 0.5) same += 1;
+      if (gap < 1.5) near += 1;
+    });
+    const fplRun = cells.filter((c) => c.fpl != null).map((c) => c.fpl);
+    const deskRun = cells.filter((c) => c.desk != null).map((c) => c.desk);
+    rows.push({
+      team: t, cells,
+      fplAvg: fplRun.length ? round(mean(fplRun), 2) : null,
+      deskAvg: deskRun.length ? round(mean(deskRun), 2) : null,
+      gap: fplRun.length && deskRun.length ? round(mean(deskRun) - mean(fplRun), 2) : null,
+    });
+  });
+
+  // Sorted by how far apart the two scales put the club, because the rows worth
+  // reading are the ones where the choice of scale changes the answer.
+  rows.sort((a, b) => Math.abs(b.gap || 0) - Math.abs(a.gap || 0));
+  return {
+    gws, rows,
+    agree: n ? round((same / n) * 100, 0) : null,
+    within1: n ? round((near / n) * 100, 0) : null,
+    avgGap: n ? round(spread / n, 2) : null,
+    compared: n,
+    ready: desk.ready,
+    cuts: desk.cuts,
+    ratings: desk.ratings,
+  };
+}
+
+/**
+ * Every finished match, newest round first, with the clubs resolved.
+ *
+ * Grouped by gameweek because that is the unit people remember a season in.
+ */
+export function matchResults(ctx, opts = {}) {
+  const rows = (ctx.snapshot && ctx.snapshot.results) || [];
+  const byGw = new Map();
+  for (const m of rows) {
+    const h = ctx.teams.get(m.h), a = ctx.teams.get(m.a);
+    if (!h || !a) continue;
+    if (!byGw.has(m.gw)) byGw.set(m.gw, []);
+    byGw.get(m.gw).push({
+      gw: m.gw, ko: m.ko,
+      home: h, away: a, hs: m.hs, as: m.as,
+      result: m.hs > m.as ? 'H' : m.hs < m.as ? 'A' : 'D',
+      goals: m.hs + m.as,
+    });
+  }
+  const gws = [...byGw.keys()].sort((a, b) => b - a);
+  const limited = opts.limit ? gws.slice(0, opts.limit) : gws;
+  return {
+    gameweeks: limited.map((gw) => ({
+      gw,
+      matches: byGw.get(gw).slice().sort((x, y) => String(x.ko).localeCompare(String(y.ko))),
+      goals: byGw.get(gw).reduce((s, m) => s + m.goals, 0),
+    })),
+    total: rows.length,
+    rounds: gws.length,
+  };
+}
+
+/**
+ * The season's raw per-player numbers, sorted however the table asks.
+ *
+ * Deliberately separate from the six Desk scores: those are projections, these
+ * are what has already happened. Mixing the two in one table is how people stop
+ * being able to tell which is which.
+ */
+export const STAT_COLUMNS = [
+  { key: 'pts', label: 'Pts', title: 'Total points this season' },
+  { key: 'mins', label: 'Min', title: 'Minutes played' },
+  { key: 'starts', label: 'St', title: 'Starts' },
+  { key: 'goals', label: 'G', title: 'Goals scored' },
+  { key: 'assists', label: 'A', title: 'Assists' },
+  { key: 'xG', label: 'xG', dp: 2, title: 'Expected goals' },
+  { key: 'xA', label: 'xA', dp: 2, title: 'Expected assists' },
+  { key: 'xGI', label: 'xGI', dp: 2, title: 'Expected goal involvements' },
+  { key: 'xGI90', label: 'xGI/90', dp: 2, title: 'Expected goal involvements per 90 minutes' },
+  { key: 'xGC90', label: 'xGC/90', dp: 2, title: 'Expected goals conceded per 90 minutes' },
+  { key: 'cs', label: 'CS', title: 'Clean sheets' },
+  { key: 'saves', label: 'Sv', title: 'Saves' },
+  { key: 'defCon', label: 'DC', title: 'Defensive contributions' },
+  { key: 'bonus', label: 'Bns', title: 'Bonus points' },
+  { key: 'bps', label: 'BPS', title: 'Bonus points system total' },
+  { key: 'ict', label: 'ICT', dp: 1, title: "FPL's ICT index" },
+  { key: 'owned', label: 'Own', dp: 1, suffix: '%', title: 'Selected by' },
+  { key: 'price', label: '£', dp: 1, prefix: '£', title: 'Current price' },
+];
+
+export function statRows(ctx, opts = {}) {
+  const q = (opts.q || '').trim().toLowerCase();
+  const col = STAT_COLUMNS.find((c) => c.key === opts.sort) || STAT_COLUMNS[0];
+  const dir = opts.dir === 1 ? 1 : -1;
+
+  let rows = ctx.players.filter((p) => {
+    if (opts.pos && opts.pos !== 'ALL' && p.pos !== opts.pos) return false;
+    if (opts.team && p.team !== Number(opts.team)) return false;
+    // Someone who has not played has no season to report; the default hides
+    // them so the table is about football rather than about squad lists.
+    if (opts.playedOnly !== false && !(p.mins > 0)) return false;
+    if (q) {
+      const t = ctx.teams.get(p.team) || {};
+      const hay = `${p.full || ''} ${p.name} ${t.name || ''} ${t.short || ''}`.toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+
+  const val = (p) => {
+    const v = p[col.key];
+    return typeof v === 'number' ? v : Number(v) || 0;
+  };
+  // dir −1 is descending, matching the Targets table. Multiplying by
+  // (b − a) instead of (a − b) inverts that, and a "sorted by xG" column
+  // that leads with zeroes reads as broken data rather than a broken sort.
+  rows = rows.slice().sort((a, b) => dir * (val(a) - val(b)) || a.name.localeCompare(b.name));
+  return { rows: opts.limit ? rows.slice(0, opts.limit) : rows, total: rows.length, col, dir };
 }
 
 /* ─────────────────────── FPL's price predictor ─────────────────────────── */
@@ -982,15 +1342,29 @@ export function fillSlots(ctx, squadIds, holes, bank, opts = {}) {
    * upgrade that adds the most and takes it, until nothing left is worth the
    * money. One swap at a time, because a squad is a set of one-slot decisions
    * and the best next move is the only one worth being sure about. */
-  const rounds = opts.upgrade === false ? 0 : 24;
+  const rounds = opts.upgrade === false ? 0 : 40;
   for (let i = 0; i < rounds && money > 0.05 && fills.length; i++) {
     let best = null;
     for (const f of fills) {
       const others = ids.filter((id) => id !== f.player.id);
-      const cand = slotOptions(f.pos, ctx, round(money + f.player.price, 1), others, {
-        filter: { legalOnly: true, avail: 'fit', sort: opts.sort || 'gain' }, limit: 1,
-      })[0];
-      if (!cand || cand.player.id === f.player.id) continue;
+      /* Ranked by SCORE here, not by gain.
+       *
+       * Gain is value for money, which is the right question while the reserve
+       * is holding money back for slots not yet reached. It is the wrong
+       * question once the squad is complete and there is cash spare: asking for
+       * the best value player inside a budget of £40m returns the same £4.5m
+       * bargain it already picked, the loop sees no lift and stops — which is
+       * how a wildcard used to finish with thirty million in the bank. Spare
+       * money should buy the best player it can reach, not the best deal. */
+      const rows = slotOptions(f.pos, ctx, round(money + f.player.price, 1), others, {
+        filter: { legalOnly: true, avail: 'fit', sort: opts.sort || 'gain' }, limit: 40,
+      });
+      let cand = null;
+      for (const r of rows) {
+        if (r.player.id === f.player.id) continue;
+        if (!cand || r.player.scores.overall > cand.player.scores.overall) cand = r;
+      }
+      if (!cand) continue;
       const lift = cand.player.scores.overall - f.player.scores.overall;
       if (lift > 1e-6 && (!best || lift > best.lift)) best = { f, to: cand.player, lift };
     }
@@ -1001,6 +1375,101 @@ export function fillSlots(ctx, squadIds, holes, bank, opts = {}) {
   }
 
   return { fills, bank: money, unfilled };
+}
+
+/**
+ * A scoring key that looks past the week being picked.
+ *
+ * A starting eleven is a weekly decision, so the default everywhere is a single
+ * gameweek. This exists for the case where you are picking a side you intend to
+ * keep for a run and want the eleven that is best across it — which is a
+ * different question, and one the caller has to ask for on purpose.
+ */
+export function horizonKey(gwIndex, weeks = 3) {
+  return (p) => {
+    let total = 0;
+    for (let i = gwIndex; i < gwIndex + weeks; i++) total += (p.proj && p.proj[i]) || 0;
+    return total;
+  };
+}
+
+/**
+ * The eleven to field in a given gameweek, captain and vice included.
+ *
+ * Two things make this more than a call to `arrangeXI`.
+ *
+ * It reads the squad **as the plan leaves it** in that week, so a lineup shown
+ * for GW3 already contains the transfers staged for GW3 — being recommended an
+ * eleven you could not actually field is worse than no recommendation.
+ *
+ * And the armband is always decided on the target week alone, even when the
+ * eleven is picked over a longer run. Captaincy is a one-week bet; there is no
+ * sense in which you captain someone for the next three gameweeks.
+ */
+export function recommendedLineup(ctx, plan, gw, opts = {}) {
+  if (!ctx.squad.length) return null;
+  const target = gw == null ? ctx.gws[0] : gw;
+  const idx = ctx.gws.indexOf(target);
+  if (idx < 0) return null;
+
+  let ids = ctx.squad.map((s) => s.id);
+  let staged = [], holes = [], chip = null, fromPlan = false;
+  if (plan) {
+    const wk = evaluatePlan(plan, ctx, opts.planOpts || {}).weeks.find((w) => w.gw === target);
+    if (wk) {
+      ids = wk.squad.filter((x) => x != null);
+      staged = wk.transfers.filter((t) => t.in != null);
+      holes = wk.holes || [];
+      chip = wk.chip || null;
+      fromPlan = true;
+    }
+  }
+
+  const players = ids.map((id) => ctx.byId.get(id)).filter(Boolean);
+  if (!players.length) return null;
+  const weeks = Math.max(1, Math.min(opts.weeks || 1, ctx.gws.length - idx));
+  const arr = arrangeXI(players, idx, null, weeks > 1 ? horizonKey(idx, weeks) : null);
+  if (!arr) return null;
+
+  const week = (p) => (p.proj && p.proj[idx]) || 0;
+  const ranked = arr.xi.slice().sort((a, b) => week(b) - week(a));
+  const captain = ranked[0] || null;
+  const vice = ranked[1] || null;
+
+  return {
+    gw: target, idx, weeks,
+    formation: arr.formation,
+    xi: arr.xi, bench: arr.bench,
+    captain, vice,
+    incomplete: !!arr.incomplete,
+    missing: arr.missing || null,
+    // What the eleven projects for the target week, before the armband doubles.
+    points: round(arr.xi.reduce((s, p) => s + week(p), 0), 2),
+    captainPoints: captain ? round(week(captain), 2) : 0,
+    staged, holes, chip, fromPlan,
+    basis: weeks > 1 ? `${weeks} gameweeks` : 'this gameweek',
+  };
+}
+
+/**
+ * What auto-picking would change, and by how much.
+ *
+ * The planner's button used to clear the manual lineup and redraw — so when the
+ * lineup was already automatic, clicking it did nothing at all and looked
+ * broken. Returning the diff lets the interface say "four changes, +2.3" or
+ * "already the best eleven", which are different answers and both useful.
+ */
+export function autoPickDiff(current, next, gwIndex) {
+  const now = new Set((current || []).map((p) => (typeof p === 'object' ? p.id : p)));
+  const then = next.xi.map((p) => p.id);
+  const changed = then.filter((id) => !now.has(id));
+  const value = (p) => (p.proj && p.proj[gwIndex]) || 0;
+  return {
+    changed: changed.length,
+    same: changed.length === 0,
+    inIds: changed,
+    points: round(next.xi.reduce((s, p) => s + value(p), 0), 2),
+  };
 }
 
 /** Which formations this squad could actually field. */
