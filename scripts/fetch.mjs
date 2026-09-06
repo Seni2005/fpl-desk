@@ -284,6 +284,9 @@ function updatePredictions(prev, snapshot, engine) {
   if (existing && existing.locked) return log;
 
   const ctx = engine.buildContext(snapshot, {}, false);
+  // The same automatic rule the page uses, so a logged forecast and the number
+  // on screen come off the same difficulty scale rather than agreeing by luck.
+  engine.applyDifficulty(ctx, 'auto');
   const rows = [];
   for (const p of ctx.players) {
     const proj = p.proj && p.proj[0];
@@ -824,6 +827,20 @@ async function main() {
       .filter((e) => !e.finished)
       .slice(0, 14)
       .map((e) => ({ id: e.id, name: e.name, deadline: e.deadline_time })),
+    /* Every finished match of the season, with the score.
+     *
+     * The fixture map only ever kept the six weeks AHEAD, so nothing on the
+     * page could look backwards: no league table, no goals for and against, and
+     * no way to rate a fixture against how the two clubs have actually played.
+     * 380 rows of five small numbers is nothing to carry. */
+    results: fixtures
+      .filter((f) => f.finished && f.event != null &&
+        f.team_h_score != null && f.team_a_score != null)
+      .map((f) => ({
+        gw: f.event, h: f.team_h, a: f.team_a,
+        hs: f.team_h_score, as: f.team_a_score, ko: f.kickoff_time,
+      }))
+      .sort((x, y) => x.gw - y.gw || String(x.ko).localeCompare(String(y.ko))),
     // Every round that has been scored, with what the field managed. This is
     // what lets your season chart plot you against the average rather than
     // against nothing.
