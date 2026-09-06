@@ -13,9 +13,12 @@ import {
   playerMatchState, newsFeed, captaincyBoard,
   slotOptions, finishMarket, MARKET_SORTS, fdrAhead, fillSlots,
   seasonReview, setPieces, setPieceText, chipPlanner, adviceReview, leagueEdge, priceOutlook,
+  recommendedLineup, autoPickDiff, teamRatings, matchResults, statRows, STAT_COLUMNS,
+  difficultyAudit,
+  FDR_SOURCES,
   arrangeXI, swapLineup, applyFormation, availableFormations, xiCounts, formationName,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB, SQUAD_SHAPE,
-} from './engine.js?v=16';
+} from './engine.js?v=17';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -38,6 +41,9 @@ const ordinal = (n) => {
 };
 
 let CTX = null, CHANGES = null, PRICELOG = null, DETAILS = {}, TEAM = new Map();
+// The raw snapshot, kept because switching difficulty scale rebuilds the whole
+// context rather than repainting a stale one.
+let SNAP = null;
 /** What was predicted before each deadline, and what actually happened. */
 let PREDICTIONS = null, TIMELINE = null;
 /** Lifecycle of the round, and which gameweek every recommendation targets. */
@@ -62,7 +68,7 @@ const DEFAULTS = {
   pos: 'ALL', sort: 'overall', dir: -1, maxPrice: 16, hideFlag: true, hideOwned: false, q: '',
   pDir: 'all', pQ: '', pMine: false, pOwned: true, pSort: 'ratio', pDirn: -1,
   activePlan: 'A', plans: null, lastSeen: null,
-  sbView: 'pitch',
+  sbView: 'pitch', sbBasis: 1, fdr: 'auto',
   mk: { q: '', pos: 'all', team: '', maxPrice: null, avail: 'all', maxFdr: null, setPiece: null, sort: 'gain' },
 };
 function loadPrefs() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('fpldesk.prefs') || '{}') }; } catch { return { ...DEFAULTS }; } }
@@ -83,9 +89,22 @@ function applyMode() {
 const FDR_WORD = { 1: 'very easy', 2: 'easy', 3: 'even', 4: 'tough', 5: 'very tough' };
 const fdrClass = (d) => 'f' + Math.min(5, Math.max(1, Math.round(d)));
 
+/**
+ * One fixture chip.
+ *
+ * The tooltip carries BOTH ratings whenever they disagree. The whole point of
+ * measuring difficulty ourselves is that FPL's number is a July opinion; hiding
+ * the number we are disagreeing with would make the disagreement invisible.
+ */
 function fxChip(f) {
   const t = TEAM.get(f.opp) || {}, o = t.short || '?';
-  const title = `${t.name || '?'}${f.home ? ' (home)' : ' (away)'} · difficulty ${f.d}, ${FDR_WORD[f.d] || ''}`;
+  let title = `${t.name || '?'}${f.home ? ' (home)' : ' (away)'} · difficulty ${f.d}, ${FDR_WORD[f.d] || ''}`;
+  if (f.deskD != null && f.fplD != null && f.deskD !== f.fplD) {
+    title += CTX && CTX.fdr && CTX.fdr.active === 'desk'
+      ? ` · FPL rate it ${f.fplD}`
+      : ` · Desk rate it ${f.deskD}`;
+  }
+  if (f.xGA != null) title += ` · ${f.xGA} goals expected against`;
   return `<span class="fx ${fdrClass(f.d)}" title="${esc(title)}">${f.home ? o : o.toLowerCase()}<small>${f.d}</small></span>`;
 }
 function gwChip(fixture) {
@@ -650,6 +669,10 @@ function renderSandbox(evaluated) {
 
   $$('#sbView [data-sbview]').forEach((b) =>
     b.setAttribute('aria-pressed', String(b.dataset.sbview === prefs.sbView)));
+  // An eleven is a weekly decision, so one week is the default. Picking over a
+  // run is a different question and has to be asked for on purpose.
+  $$('#sbBasis [data-basis]').forEach((b) =>
+    b.setAttribute('aria-pressed', String(Number(b.dataset.basis) === (Number(prefs.sbBasis) || 1))));
 
   /* ── the squad, as a pitch or as a list ── */
   const staged = new Set();
@@ -1035,11 +1058,27 @@ function wireSandbox(week, holes, players, idx) {
 
   /* the action bar */
   $('#sbAuto').onclick = () => {
+    const weeks = Number(prefs.sbBasis) || 1;
+    const rec = recommendedLineup(CTX, getPlans()[prefs.activePlan], SB_GW, { weeks });
+    if (!rec) { SB_MSG = 'Nothing to pick from yet.'; redraw(); return; }
+    const diff = autoPickDiff(week ? week.xi : [], rec, idx);
     const wk = sbStep(true);
-    delete wk.xi; delete wk.bench;
-    SB_MSG = 'Eleven picked by projected points.';
+    // Saved as a lineup, not cleared. Clearing it only worked when the eleven
+    // had been changed by hand — click it on an already-automatic side and the
+    // screen did not move, which reads as a broken button.
+    wk.xi = rec.xi.map((p) => p.id);
+    wk.bench = rec.bench.map((p) => p.id);
+    SB_MSG = diff.same
+      ? `Already the best eleven for ${weeks > 1 ? `the next ${weeks} gameweeks` : `GW${SB_GW}`}` +
+        ` — ${rec.formation}, ${diff.points} projected.`
+      : `${diff.changed} change${diff.changed === 1 ? '' : 's'} — ${rec.formation}, ` +
+        `${diff.points} projected over ${weeks > 1 ? `${weeks} gameweeks` : `GW${SB_GW}`}. ` +
+        `Captain ${rec.captain ? rec.captain.name : '—'}.`;
     savePrefs(); redraw();
   };
+  $$('#sbBasis [data-basis]').forEach((b) => b.addEventListener('click', () => {
+    prefs.sbBasis = Number(b.dataset.basis); savePrefs(); redraw();
+  }));
   $('#sbClear').onclick = () => {
     const wk = sbStep(true);
     const ids = week ? week.squad.filter((id) => id != null) : CTX.squad.map((s) => s.id);
@@ -1066,9 +1105,15 @@ function wireSandbox(week, holes, players, idx) {
       if (hole) hole.in = fl.player.id;
     });
     SB_SEL = null;
+    // The bank quoted here is the PLAN's, recomputed after the fills land, not
+    // fillSlots' own running total. The two can differ by a selling-price
+    // adjustment, and a sentence that disagrees with the counter three inches
+    // away makes both numbers untrustworthy.
+    const left = sbWeek(evaluatePlan(getPlans()[prefs.activePlan], CTX));
+    const money = left ? left.bank : r.bank;
     SB_MSG = r.unfilled.length
-      ? `Filled ${r.fills.length}. No ${r.unfilled.map((h) => h.pos).join('/')} fits what is left — £${r.bank.toFixed(1)}m in the bank.`
-      : `Filled ${r.fills.length} slot${r.fills.length === 1 ? '' : 's'}, £${r.bank.toFixed(1)}m left. A starting point, not a finished squad.`;
+      ? `Filled ${r.fills.length}. No ${r.unfilled.map((h) => h.pos).join('/')} fits what is left — £${money.toFixed(1)}m in the bank.`
+      : `Filled ${r.fills.length} slot${r.fills.length === 1 ? '' : 's'}, £${money.toFixed(1)}m left. A starting point, not a finished squad.`;
     savePrefs(); redraw();
   };
   $('#sbUndo').onclick = () => {
@@ -1326,6 +1371,7 @@ function renderSquad() {
   const e = CTX.entry;
   if (!CTX.squad.length) {
     $('#fdrKey').hidden = true;
+    $('#bestXI').hidden = true;
     // Teams ARE configured, you just have not said which one you are. That is
     // a different situation from "no team ID set up" and needs a different
     // answer — the setup instructions would be actively confusing here.
@@ -1364,6 +1410,8 @@ function renderSquad() {
    * you actually have while looking at the pitch — are these numbers moving
    * right now, are they final, or is this a fixture list? */
   const st = squadStatus();
+  $('#bestXI').hidden = false;
+  $('#bestXI').textContent = `Best lineup for GW${GW ? GW.targetGw : CTX.gws[0]}`;
   $('#squadNote').innerHTML =
     `<span class="sq-state ${st.tone}">${st.dot}${esc(st.label)}</span>` +
     `<span>${esc(shape)}</span>` +
@@ -1382,7 +1430,367 @@ function renderSquad() {
   const key = $('#fdrKey'); key.hidden = false;
   key.innerHTML = '<span>Fixture difficulty</span>' +
     [1, 2, 3, 4, 5].map((d) => `<span class="fx f${d}" title="${d} — ${FDR_WORD[d]}">${d}</span>`).join('') +
-    '<span>easiest to hardest · UPPER CASE is home</span>';
+    '<span>easiest to hardest · UPPER CASE is home</span>' +
+    '<span class="kspacer"></span>' +
+    '<span>Scale</span>' +
+    '<span class="seg tiny" id="fdrSeg" role="group" aria-label="Difficulty scale">' +
+    FDR_SOURCES.map((s) =>
+      `<button data-fdr="${s.key}" title="${esc(s.title)}" ` +
+      `aria-pressed="${String((prefs.fdr || 'auto') === s.key)}">${esc(s.label)}</button>`).join('') +
+    '</span>' + `<span id="fdrWhy">${esc(fdrWhy())}</span>`;
+
+  $$('#fdrSeg [data-fdr]').forEach((b) => { b.onclick = () => setFdrSource(b.dataset.fdr); });
+}
+
+/** One line saying which scale is running and, when it matters, why. */
+function fdrWhy() {
+  const f = (CTX && CTX.fdr) || {};
+  if (f.active === 'desk') {
+    return f.ready
+      ? 'measured from results so far'
+      : 'measured from results — too few played to trust yet';
+  }
+  if (f.source === 'auto') {
+    return f.ready
+      ? "FPL's own rating"
+      : "FPL's own rating · Desk takes over once the clubs have played enough";
+  }
+  return "FPL's own rating, set before the season";
+}
+
+/**
+ * Switching scale re-runs the model, not just the paint.
+ *
+ * Difficulty feeds every projection on the page, so the honest response to a
+ * click here is to recompute the context and redraw the lot. Redrawing the
+ * chips alone would leave the numbers underneath them on the old scale.
+ */
+function setFdrSource(key) {
+  if ((prefs.fdr || 'auto') === key) return;
+  prefs.fdr = key; savePrefs();
+  const chosen = CTX.entry && CTX.entry.key;
+  CTX = buildContext(SNAP, DETAILS, false, { fdr: key });
+  CTX.teams.forEach((t) => TEAM.set(t.id, t));
+  if (chosen) selectEntry(CTX, chosen);
+  GW = gameweekState(CTX);
+  renderAll();
+}
+
+/* ═══════════════════════════════ stats ═════════════════════════════════ */
+
+let ST_TAB = 'teams';
+const ST = { q: '', pos: 'ALL', team: '', sort: 'pts', dir: -1 };
+
+function renderStats() {
+  const sec = $('#stats');
+  const ratings = teamRatings(CTX);
+  const results = matchResults(CTX);
+  sec.hidden = false;
+
+  $$('#stSeg [data-st]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.st === ST_TAB)));
+  $('#statNote').textContent = results.total
+    ? `${results.total} matches played across ${results.rounds} gameweek${results.rounds === 1 ? '' : 's'}`
+    : 'no matches played yet';
+
+  if (ST_TAB === 'teams') renderTeamStats(ratings, results);
+  else if (ST_TAB === 'players') renderPlayerStats();
+  else if (ST_TAB === 'fdr') renderFdrAudit();
+  else renderResults(results);
+
+  // onclick, not addEventListener: these buttons are static markup, so a fresh
+  // listener on every render would stack up one per visit to the section.
+  $$('#stSeg [data-st]').forEach((b) => {
+    b.onclick = () => { ST_TAB = b.dataset.st; renderStats(); };
+  });
+}
+
+/** A rating against the league average, drawn from the 1.00 line outward. */
+function rateBar(v) {
+  const off = Math.max(-0.6, Math.min(0.6, (v || 1) - 1));
+  const w = (Math.abs(off) / 0.6) * 50;
+  return '<span class="ratebar"><span class="num">' + (v || 1).toFixed(2) + '</span>' +
+    `<span class="track"><i class="${off >= 0 ? 'up' : 'dn'}" style="width:${w.toFixed(1)}%"></i></span></span>`;
+}
+
+function renderTeamStats(r, results) {
+  $('#statTools').innerHTML = '';
+  if (!results.total) {
+    $('#statBody').innerHTML = '<p class="note">No matches have been played yet, so there is no ' +
+      'table and nothing to rate. This fills in from the first result.</p>';
+    $('#statCaveat').textContent = '';
+    return;
+  }
+  $('#statBody').innerHTML =
+    '<div class="tw"><table class="st"><thead><tr>' +
+    '<th class="l">#</th><th class="l">Club</th><th>P</th><th>W</th><th>D</th><th>L</th>' +
+    '<th>GF</th><th>GA</th><th>GD</th><th>Pts</th><th>CS</th>' +
+    '<th class="l">Attack</th><th class="l">Defence</th><th class="l">Form</th>' +
+    '</tr></thead><tbody>' +
+    r.teams.map((t) => `<tr>` +
+      `<td class="l rk">${t.pos}</td>` +
+      `<td class="l"><span class="badge">${esc(t.short)}</span> ${esc(t.name)}</td>` +
+      `<td class="num">${t.all.p}</td><td class="num">${t.all.w}</td>` +
+      `<td class="num">${t.all.d}</td><td class="num">${t.all.l}</td>` +
+      `<td class="num">${t.all.gf}</td><td class="num">${t.all.ga}</td>` +
+      `<td class="num ${t.gd > 0 ? 'u' : t.gd < 0 ? 'd' : ''}">${t.gd > 0 ? '+' : ''}${t.gd}</td>` +
+      `<td class="num"><b>${t.points}</b></td><td class="num">${t.all.cs}</td>` +
+      `<td class="l" title="Goals scored per game against the league average — ${t.att.toFixed(2)}×">${rateBar(t.att)}</td>` +
+      `<td class="l" title="Goals conceded per game against the league average, inverted so higher is better — ${t.def.toFixed(2)}×">${rateBar(t.def)}</td>` +
+      `<td class="l"><span class="formstr">${t.form5.map((f) => `<i class="${f}">${f}</i>`).join('')}</span></td>` +
+      '</tr>').join('') + '</tbody></table></div>';
+
+  $('#statCaveat').textContent =
+    `Attack and defence are goals per game against the league average, so 1.00 is average and higher ` +
+    `is better on both — defence is inverted for that reason. Each is shrunk toward the average as ` +
+    `though ${r.shrink} average games sat behind it, because a club that has scored six in two games ` +
+    `has played two games, not proved anything. ` +
+    (r.reliable
+      ? `With ${r.perTeam} games a side these are worth reading.`
+      : `At ${r.perTeam} game${r.perTeam === 1 ? '' : 's'} a side they are still mostly the prior — ` +
+        'treat them as a sketch.');
+}
+
+function renderPlayerStats() {
+  const clubs = [...TEAM.values()].sort((a, b) => a.name.localeCompare(b.name));
+  $('#statTools').innerHTML =
+    '<div class="altsearch"><input type="search" id="stQ" autocomplete="off" spellcheck="false" ' +
+      `placeholder="Search any player or club…" aria-label="Search players" value="${esc(ST.q)}"></div>` +
+    '<select id="stPos" aria-label="Position">' +
+      ['ALL', 'GKP', 'DEF', 'MID', 'FWD'].map((p) =>
+        `<option value="${p}"${ST.pos === p ? ' selected' : ''}>${p === 'ALL' ? 'Every position' : p}</option>`).join('') +
+    '</select>' +
+    '<select id="stTeam" aria-label="Club"><option value="">Every club</option>' +
+      clubs.map((t) => `<option value="${t.id}"${String(ST.team) === String(t.id) ? ' selected' : ''}>${esc(t.name)}</option>`).join('') +
+    '</select>';
+
+  const { rows, total, col, dir } = statRows(CTX, { ...ST, limit: 150 });
+  const head = STAT_COLUMNS.map((c) =>
+    `<th class="sortable${c.key === col.key ? ' on' : ''}" data-stcol="${c.key}" title="${esc(c.title)}">` +
+    `${esc(c.label)}<i>${c.key === col.key ? (dir === -1 ? '↓' : '↑') : '↕'}</i></th>`).join('');
+
+  $('#statBody').innerHTML = !rows.length
+    ? '<p class="note">Nobody matches those filters.</p>'
+    : '<div class="tw"><table class="st"><thead><tr><th class="l">Player</th>' + head + '</tr></thead><tbody>' +
+      rows.map((p) => {
+        const t = TEAM.get(p.team) || {};
+        return '<tr>' +
+          `<td class="l"><span class="badge">${esc(t.short || '')}</span>` +
+          `<button class="who lk" data-pid="${p.id}">${esc(p.name)}</button>` +
+          `<span class="pos-badge">${esc(p.pos)}</span>${statusTag(p)}${penTag(p)}</td>` +
+          STAT_COLUMNS.map((c) => {
+            const v = Number(p[c.key]) || 0;
+            const txt = (c.prefix || '') + (c.dp != null ? v.toFixed(c.dp) : v.toLocaleString()) + (c.suffix || '');
+            return `<td class="num${c.key === col.key ? ' on' : ''}">${txt}</td>`;
+          }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>';
+
+  $('#statCaveat').textContent =
+    `${total.toLocaleString()} players with minutes${total > 150 ? ', top 150 shown' : ''}. ` +
+    'These are what has already happened — goals, minutes, expected goals, bonus. The projections ' +
+    'and the six Desk scores live in Targets; keeping them apart is deliberate, because a record and ' +
+    'a forecast should never be read off the same row.';
+
+  const q = $('#stQ');
+  let t = null;
+  q.oninput = () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      ST.q = q.value; renderStats();
+      const n = $('#stQ'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+    }, 120);
+  };
+  $('#stPos').onchange = (e) => { ST.pos = e.target.value; renderStats(); };
+  $('#stTeam').onchange = (e) => { ST.team = e.target.value; renderStats(); };
+  $$('#statBody [data-stcol]').forEach((th) => th.addEventListener('click', () => {
+    const k = th.dataset.stcol;
+    if (ST.sort === k) ST.dir = ST.dir === -1 ? 1 : -1; else { ST.sort = k; ST.dir = -1; }
+    renderStats();
+  }));
+  $$('#statBody [data-pid]').forEach((el) =>
+    el.addEventListener('click', () => openPlayer(Number(el.dataset.pid))));
+}
+
+/**
+ * FPL's scale against ours, club by club.
+ *
+ * The point of the section is falsifiability: Seni asked whether the difficulty
+ * scale is accurate, and the only honest answer is one you can check. So this
+ * shows both numbers for every fixture in the horizon, sorted by disagreement,
+ * with the clubs the two scales rate differently at the top.
+ */
+function renderFdrAudit() {
+  $('#statTools').innerHTML = '';
+  const a = difficultyAudit(CTX, CTX.gws.length);
+  const active = (CTX.fdr && CTX.fdr.active) || 'fpl';
+
+  if (!a.compared) {
+    $('#statBody').innerHTML = '<p class="note">No results yet, so there is nothing to rate the ' +
+      "fixtures from. Until clubs have played, the page runs on FPL's own scale.</p>";
+    $('#statCaveat').textContent = '';
+    return;
+  }
+
+  const cell = (c) => {
+    if (c.blank) return '<td class="num dim">–</td>';
+    const shown = active === 'desk' && c.desk != null ? c.desk : c.fpl;
+    const other = active === 'desk' ? c.fpl : c.desk;
+    const opp = c.games.map((f) => {
+      const t = TEAM.get(f.opp) || {};
+      return f.home ? (t.short || '?') : (t.short || '?').toLowerCase();
+    }).join(' ');
+    const title = `${opp} · FPL ${c.fpl == null ? '—' : c.fpl}, Desk ${c.desk == null ? '—' : c.desk}` +
+      (c.xGA != null ? ` · ${c.xGA} expected against` : '');
+    return `<td class="num fdrcell" title="${esc(title)}">` +
+      `<span class="fx ${fdrClass(shown)}">${shown == null ? '–' : shown}</span>` +
+      `<small class="alt">${other == null ? '' : other}</small></td>`;
+  };
+
+  $('#statBody').innerHTML =
+    '<div class="tw"><table class="st fdrtab"><thead><tr>' +
+    '<th class="l">Club</th>' + a.gws.map((g) => `<th>GW${g}</th>`).join('') +
+    '<th>FPL</th><th>Desk</th><th>Gap</th></tr></thead><tbody>' +
+    a.rows.map((r) => '<tr>' +
+      `<td class="l"><span class="badge">${esc(r.team.short)}</span> ${esc(r.team.name)}</td>` +
+      r.cells.map(cell).join('') +
+      `<td class="num">${r.fplAvg == null ? '—' : r.fplAvg.toFixed(2)}</td>` +
+      `<td class="num">${r.deskAvg == null ? '—' : r.deskAvg.toFixed(2)}</td>` +
+      `<td class="num ${r.gap > 0 ? 'd' : r.gap < 0 ? 'u' : ''}">` +
+      `${r.gap == null ? '—' : signed(r.gap, 2)}</td>` +
+      '</tr>').join('') + '</tbody></table></div>';
+
+  $('#statCaveat').textContent =
+    `The big number is the scale the page is running on (${active === 'desk' ? 'Desk' : 'FPL'}); ` +
+    'the small one beside it is the other. Gap is Desk minus FPL over the run, so a positive gap ' +
+    `means we rate the run harder than FPL do. The two agree exactly on ${a.agree}% of these ` +
+    `fixtures and land within one of each other on ${a.within1}%, averaging ${a.avgGap} apart. ` +
+    (a.ready
+      ? `Ours is expected goals against you — the opponent's attack at that venue against your ` +
+        `defence — cut into fifths at ${a.cuts.join(', ')}. FPL's is set before the season and ` +
+        'barely moves, which is why the gap grows as results accumulate.'
+      : 'Ours is not trustworthy yet: too few matches have been played to rate clubs from, so the ' +
+        "page stays on FPL's scale until they have. This table is here to be watched, not used.");
+}
+
+function renderResults(results) {
+  $('#statTools').innerHTML = '';
+  if (!results.total) {
+    $('#statBody').innerHTML = '<p class="note">No matches finished yet.</p>';
+    $('#statCaveat').textContent = '';
+    return;
+  }
+  $('#statBody').innerHTML = results.gameweeks.map((g) =>
+    '<div class="resday"><span class="lab">' +
+      `Gameweek ${g.gw} · ${g.matches.length} matches · ${g.goals} goals</span>` +
+    '<div class="reslist">' +
+    g.matches.map((m) => {
+      const when = m.ko ? new Date(m.ko).toLocaleDateString('en-AU',
+        { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short' }) : '';
+      return `<div class="resrow ${m.result === 'H' ? 'hw' : m.result === 'A' ? 'aw' : ''}" title="${esc(when)}">` +
+        `<span class="rh dim">${esc(m.home.name)} <span class="badge">${esc(m.home.short)}</span></span>` +
+        `<span class="rs">${m.hs}–${m.as}</span>` +
+        `<span class="ra dim"><span class="badge">${esc(m.away.short)}</span> ${esc(m.away.name)}</span>` +
+        '</div>';
+    }).join('') + '</div></div>').join('');
+  $('#statCaveat').textContent =
+    'Every match FPL has marked finished, newest round first. These are the results the team ' +
+    'ratings and the Desk difficulty scale are built from.';
+}
+
+/* ═════════════════════ the lineup we would field ═══════════════════════ */
+
+/**
+ * The recommended eleven, drawn as a pitch.
+ *
+ * It used to be a row of name chips, which is a list of words where the thing
+ * being described is a shape. Same information, drawn the way you actually hold
+ * it in your head — and the armband goes on the shirt rather than being named
+ * three rows further down.
+ *
+ * It reads the active plan, so an eleven shown for GW3 already contains the
+ * transfers staged for GW3. Being recommended a side you could not field is
+ * worse than being recommended nothing.
+ */
+function openBestXI(gw) {
+  const target = gw == null ? (GW ? GW.targetGw : CTX.gws[0]) : gw;
+  const plan = getPlans()[prefs.activePlan];
+  const rec = recommendedLineup(CTX, plan, target, { weeks: Number(prefs.sbBasis) || 1 });
+  if (!rec) {
+    openDrawer({ title: 'Best lineup', meta: '', body: '<div class="blk"><p class="note">' +
+      'No squad to pick from yet.</p></div>' });
+    return;
+  }
+
+  const card = (p, role) => {
+    const opts = { projIdx: rec.idx, gw: rec.gw };
+    // manCard takes a pick object for the armband, so the recommendation wears
+    // its own rather than borrowing whatever you happen to have set on FPL.
+    const pick = role === 'c' ? { captain: true, multiplier: 2 }
+      : role === 'v' ? { vice: true, multiplier: 1 } : null;
+    return manCard(p, pick, opts);
+  };
+  const role = (p) => (rec.captain && p.id === rec.captain.id ? 'c'
+    : rec.vice && p.id === rec.vice.id ? 'v' : null);
+
+  const lines = { GKP: [], DEF: [], MID: [], FWD: [] };
+  rec.xi.forEach((p) => lines[p.pos].push(card(p, role(p))));
+  (rec.holes || []).forEach((h) => { if (lines[h.pos]) lines[h.pos].push(emptyCard(h)); });
+
+  let pitch = `<div class="pitch"><span class="shape">${esc(rec.formation || `${rec.xi.length}/11`)}</span>`;
+  ['GKP', 'DEF', 'MID', 'FWD'].forEach((pos) => {
+    if (lines[pos].length) pitch += `<div class="line">${lines[pos].join('')}</div>`;
+  });
+  pitch += '</div><div class="bench"><span class="lab">Bench — the order they come on</span>' +
+    '<div class="line">' + rec.bench.map((p) => card(p, null)).join('') + '</div></div>';
+
+  const doubled = rec.captainPoints * 2;
+  const note = [
+    `${rec.formation || 'short'} · ${(rec.points + rec.captainPoints).toFixed(1)} projected with the armband`,
+    // A sale with nobody bought yet is not a staged transfer, but it is very
+    // much a change to the squad this is picked from. Saying "nothing staged"
+    // over an eleven that is missing a player you have just sold would be a lie
+    // about where the recommendation came from.
+    rec.staged.length || (rec.holes && rec.holes.length)
+      ? [
+        rec.staged.length
+          ? `${rec.staged.length} transfer${rec.staged.length === 1 ? '' : 's'}`
+          : null,
+        rec.holes && rec.holes.length
+          ? `${rec.holes.length} unfilled sale${rec.holes.length === 1 ? '' : 's'}`
+          : null,
+      ].filter(Boolean).join(' and ') + ` staged in Plan ${prefs.activePlan}`
+      : 'your squad as it stands — nothing staged in the planner',
+    rec.chip ? `${CHIPS[rec.chip] ? CHIPS[rec.chip].name : rec.chip} played this week` : null,
+    rec.weeks > 1 ? `eleven picked across ${rec.weeks} gameweeks` : null,
+  ].filter(Boolean).join(' · ');
+
+  openDrawer({
+    title: `Best lineup for GW${rec.gw}`,
+    meta: note,
+    body: '<div class="blk bestxi">' + pitch +
+      '<div class="bx-arm">' +
+        (rec.captain
+          ? `<div class="bx-role"><span class="lab">Captain</span>` +
+            `<b>👑 ${esc(rec.captain.name)}</b>` +
+            `<span class="bx-sub">${rec.captainPoints.toFixed(1)} projected, ${doubled.toFixed(1)} doubled</span></div>`
+          : '') +
+        (rec.vice
+          ? `<div class="bx-role"><span class="lab">Vice</span><b>${esc(rec.vice.name)}</b>` +
+            `<span class="bx-sub">takes the armband if he does not play</span></div>`
+          : '') +
+      '</div>' +
+      (rec.holes && rec.holes.length
+        ? `<p class="note"><b>${rec.holes.length} empty ${rec.holes.length === 1 ? 'slot' : 'slots'}</b> in the plan for ` +
+          `GW${rec.gw}, so this is the best of what is left. ` +
+          `Fill ${rec.holes.length === 1 ? 'it' : 'them'} in the planner.</p>`
+        : '') +
+      '<p class="note">Highest-projecting legal eleven of the eight FPL formations, for GW' +
+        `${rec.gw}. The armband goes on the best single-week projection — captaincy is a one-week bet ` +
+        'even when the eleven is picked over a longer run.</p>' +
+    '</div>',
+  });
+
+  $$('#dBody .man[data-pid]').forEach((el) =>
+    el.addEventListener('click', () => openPlayer(Number(el.dataset.pid))));
 }
 
 /* ═══════════════════════════ your season ═══════════════════════════════ */
@@ -2475,6 +2883,9 @@ function wire() {
     const el = ev.target.closest('[data-pid]');
     if (el && !el.hasAttribute('data-buy')) openPlayer(Number(el.dataset.pid));
   });
+  const bx = $('#bestXI');
+  if (bx) bx.addEventListener('click', () => openBestXI(GW ? GW.targetGw : CTX.gws[0]));
+
   $('#dClose').addEventListener('click', closeDrawer);
   $('#scrim').addEventListener('click', closeDrawer);
   document.addEventListener('keydown', (e) => {
@@ -2879,6 +3290,7 @@ function renderAll() {
   renderScoreBug();
   renderSquad();
   renderSeason();
+  renderStats();
   renderRivals();
   renderReview();
   renderChipTiming();
@@ -2906,6 +3318,23 @@ applyTheme();
   const el = document.getElementById('buildTag');
   if (m && el) el.textContent = 'b' + m.content;
 })();
+
+/**
+ * Publish the sticky header's real height as --navh.
+ *
+ * The header wraps to a second row in Analyst and on narrow screens, so a fixed
+ * scroll offset is wrong exactly when it matters. Anchors read this, which is
+ * why a nav jump now lands with the heading under the header rather than a
+ * hundred pixels past it.
+ */
+(() => {
+  const nav = document.querySelector('nav');
+  if (!nav) return;
+  const set = () => document.documentElement.style.setProperty('--navh', `${Math.round(nav.offsetHeight)}px`);
+  set();
+  if (window.ResizeObserver) new ResizeObserver(set).observe(nav);
+  else window.addEventListener('resize', set);
+})();
 const bust = '?v=' + Date.now();
 const grab = (f, fallback) => fetch(f + bust).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
 
@@ -2925,7 +3354,8 @@ Promise.all([
   // A ?team= in the URL skips the chooser, so a direct link can go straight to
   // one manager. Otherwise nothing is selected yet and the gate decides.
   const asked = new URLSearchParams(location.search).get('team');
-  CTX = buildContext(snap, DETAILS, asked || false);
+  SNAP = snap;
+  CTX = buildContext(snap, DETAILS, asked || false, { fdr: prefs.fdr || 'auto' });
   CTX.teams.forEach((t) => TEAM.set(t.id, t));
 
   GW = gameweekState(CTX);
