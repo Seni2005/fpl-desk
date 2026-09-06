@@ -28,6 +28,9 @@ answer has a **Why?** that unfolds the evidence behind it.
 - **Captaincy** — who the field is captaining and by how much, alongside the differential picks: near the same projection at a fraction of the ownership, with the points swing each one is worth against the popular choice.
 - **What changed** — price moves, availability, form and ownership swings since the previous refresh, with your own players marked.
 - **Your squad** on a pitch in your actual formation, with its own status line saying whether the round is updating, final, or not started, and how fresh the numbers are. Each card carries its gameweek score — the captain's doubled and shown with the working (`👑 24 pts` over `12 pts × 2`) — and **keeps it until the next deadline**, with the next three fixtures colour-coded underneath the whole time. Injury pins and price arrows throughout.
+- **Best lineup for the upcoming gameweek** — a button in the Squad header opens the eleven we would field, **drawn as a pitch** with the captain's and vice-captain's armbands already on the shirts, not written out as a list of names. It reads whatever you have staged in the planner, so an eleven shown for a future week already contains that week's transfers — and if you have sold someone without replacing him yet, it says so and picks the best of what is left rather than quietly fielding ten.
+- **Stats** — four tabs of record, kept deliberately apart from the forecast in Targets. The league table with attack and defence rated against the league average and recent form; every player with minutes across nineteen sortable columns (points, minutes, starts, goals, assists, xG, xA, xGI, xGI/90, xGC/90, clean sheets, saves, defensive contributions, bonus, BPS, ICT, ownership, price) filterable by position, club and name; every finished match newest round first; and an audit of the two difficulty scales side by side.
+- **A difficulty scale measured from results** — FPL's 1–5 is set before the season and barely moves, so there is a second one built from what has actually happened: the goals you would expect to concede at that venue, cut into fifths across every remaining fixture. Switch between them in the key under your squad. Whichever is active drives the projections, not just the colours, and **Stats → Difficulty** shows you exactly where the two disagree and scores its own agreement with FPL.
 - **Your leagues** — every mini-league you're in with your position and how it moved. Tap one for the table, your row highlighted.
 - **Targets** — every player scored six ways (Overall, Short, Long, Value, Differential, Captain), each column sortable, each row carrying a sparkline of the last ten gameweeks and a caret that expands **in place** to fourteen underlying numbers (xG/90, xA/90, xGI/90, xGC/90, xMin, starts, BPS, defensive actions, ownership, EO, net transfers…) with a plain-language explanation on each.
 - **A price-against-points scatter** above the table, with both axes named in words, a median-value diagonal you read positionally, and a tooltip on every point. It follows the filters, so it always describes the list beneath it.
@@ -175,7 +178,30 @@ Each chip is one fixture: the opponent's three-letter code, then the difficulty.
 
 **UPPER CASE means home, lower case means away.** So `LIV3` is home to Liverpool, `liv3` is away at Liverpool.
 
-The colours run from easiest to hardest — bright green (1), green (2), grey (3), orange (4), red (5). The digit is there so the chips still work if the colours are hard to tell apart; every chip also has a hover label spelling the fixture out in full.
+The colours run from easiest to hardest — bright green (1), green (2), grey (3), orange (4), red (5). The digit is there so the chips still work if the colours are hard to tell apart; every chip also has a hover label spelling the fixture out in full, including the other scale's rating whenever the two disagree.
+
+## Which difficulty scale is running
+
+There are two, and the switch is in the key under your squad.
+
+**FPL** is the game's own 1-5. It is set before a ball is kicked and barely moves all season, which makes it a statement about a club's reputation rather than about the fixture in front of you.
+
+**Desk** is measured from results. For each fixture it works out the goals you would expect to concede - the opponent's attack at that venue against your defence at it, both rated against the league average - and cuts every remaining fixture into fifths, so a 5 means "the hardest fifth of what is left" rather than a threshold somebody eyeballed. Ratings are shrunk toward the league average as though four average games sat behind them, because a club that has scored six in two games has played two games, not proved anything.
+
+**Auto** is the default and picks between them: FPL's until every club has played about two games, then Desk's. A scale built from one round of results is noise wearing a number, and the page would rather say so than pretend.
+
+Whichever is active drives the whole model, not just the colours - projections, the fixture matrix, the ticker and the swing markers all read it. Switching rebuilds the page. The refresh job applies the same automatic rule before it records the week's projections, so what gets logged and what you see come off the same scale.
+
+**Stats -> Difficulty** lays the two scales side by side for all twenty clubs, sorted by how far apart they put each one, and scores its own agreement with FPL at the bottom. That is there so "is the difficulty rating any good?" is a question you can answer by looking rather than one you have to take on trust.
+
+## Stats
+
+Four tabs, all of them record rather than forecast. Projections live in Targets, and the two are kept apart on purpose: a record and a forecast should never be read off the same row.
+
+- **Teams** - the league table from results, plus attack and defence rated against the league average. Higher is better on both, so defence is inverted; the caveat says so, because a "better" defence number that means fewer goals is a trap. Form is the last five.
+- **Players** - every player with minutes, nineteen columns wide: points, minutes, starts, goals, assists, xG, xA, xGI, xGI/90, xGC/90, clean sheets, saves, defensive contributions, bonus, BPS, ICT, ownership and price. Sort any column, filter by position, club or name. The name column stays put when you scroll sideways.
+- **Results** - every finished match, newest round first, with the goals in each round.
+- **Difficulty** - the audit described above.
 
 ## Your leagues
 
