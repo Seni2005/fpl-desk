@@ -2265,3 +2265,277 @@ test('the audit is honest about a season too young to rate', () => {
   const a = difficultyAudit(buildContext(makeSnapshot()));
   assert.equal(a.ready, false);
 });
+
+/* ═════════════════════ picking the team, not the squad ═══════════════════ */
+
+import { pickTeam, setArmband, lineupDiff } from '../js/engine.js';
+
+const teamCtx = () => {
+  const c = buildContext(makeSnapshot());
+  selectEntry(c, null);
+  return c;
+};
+
+test('with nothing saved it starts from the team FPL already holds', () => {
+  const c = teamCtx();
+  const t = pickTeam(c);
+  assert.equal(t.xi.length, 11);
+  assert.equal(t.bench.length, 4);
+  const starting = new Set(c.squad.filter((s) => s.slot <= 11).map((s) => s.id));
+  assert.ok(t.xi.every((p) => starting.has(p.id)), 'the eleven is the one already set');
+  assert.equal(lineupDiff(c.squad, t).changes, 0, 'so there is nothing to go and change');
+});
+
+test('and it wears FPL’s armbands rather than inventing its own', () => {
+  const c = teamCtx();
+  const cap = c.squad.find((s) => s.captain);
+  const t = pickTeam(c);
+  assert.equal(t.captain.id, cap.id);
+  assert.equal(t.captainSource, 'fpl');
+  assert.ok(t.vice && t.vice.id !== t.captain.id, 'and a vice who is not the captain');
+});
+
+test('a saved lineup outranks what FPL holds', () => {
+  const c = teamCtx();
+  const base = pickTeam(c);
+  const swap = setArmband(base, base.xi[5].id, 'captain');
+  assert.ok(swap.ok);
+  const t = pickTeam(c, { xi: base.xi.map((p) => p.id), bench: base.bench.map((p) => p.id), ...swap });
+  assert.equal(t.captain.id, base.xi[5].id);
+  assert.equal(t.captainSource, 'you');
+});
+
+test('an armband cannot be worn from the bench', () => {
+  const c = teamCtx();
+  const t = pickTeam(c);
+  const r = setArmband(t, t.bench[0].id, 'captain');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /starting eleven/);
+});
+
+test('a captain who gets benched loses the band rather than keeping a dead one', () => {
+  const c = teamCtx();
+  const base = pickTeam(c);
+  // Save a lineup that leaves the captain out of the eleven entirely.
+  const dropped = base.captain.id;
+  const xi = base.xi.filter((p) => p.id !== dropped).map((p) => p.id);
+  const t = pickTeam(c, { xi, bench: [], captain: dropped, vice: null });
+  assert.notEqual(t.captain.id, dropped, 'the band moves to someone who is actually playing');
+  assert.ok(t.xi.some((p) => p.id === t.captain.id));
+});
+
+test('giving the band to the vice swaps the two', () => {
+  const c = teamCtx();
+  const t = pickTeam(c);
+  const r = setArmband(t, t.vice.id, 'captain');
+  assert.ok(r.ok && r.swapped);
+  assert.equal(r.captain, t.vice.id);
+  assert.equal(r.vice, t.captain.id, 'the old captain takes the vice slot, not nobody');
+});
+
+test('captain and vice can never be the same player', () => {
+  const c = teamCtx();
+  const t = pickTeam(c);
+  const saved = { xi: t.xi.map((p) => p.id), bench: t.bench.map((p) => p.id),
+    captain: t.xi[0].id, vice: t.xi[0].id };
+  const again = pickTeam(c, saved);
+  assert.notEqual(again.vice.id, again.captain.id);
+});
+
+test('the armband is counted once more, three times more on a triple captain', () => {
+  const c = teamCtx();
+  const plain = pickTeam(c);
+  const tc = pickTeam(c, null, { chip: 'tc' });
+  const capValue = plain.captain.proj[0];
+  assert.ok(Math.abs((tc.points - plain.points) - capValue) < 0.02,
+    'triple captain is worth one more copy of him, not two');
+  assert.equal(tc.capMult, 3);
+});
+
+test('bench boost counts all fifteen, so the bench stops being spare', () => {
+  const c = teamCtx();
+  const plain = pickTeam(c);
+  const bb = pickTeam(c, null, { chip: 'bboost' });
+  assert.equal(bb.counted, 15);
+  assert.ok(Math.abs((bb.points - plain.points) - plain.benchPoints) < 0.02);
+});
+
+test('the diff reports what you would go and do on the official site', () => {
+  const c = teamCtx();
+  const base = pickTeam(c);
+  const out = base.xi.find((p) => p.pos === 'MID');
+  const on = base.bench.find((p) => p.pos === 'MID');
+  if (!on) return;                                  // nothing to swap with in this fixture
+  const xi = base.xi.map((p) => (p.id === out.id ? on.id : p.id));
+  const t = pickTeam(c, { xi, bench: [], captain: base.captain.id, vice: base.vice.id });
+  const d = lineupDiff(c.squad, t);
+  assert.ok(d.promoted.some((p) => p.id === on.id), 'names who comes on');
+  assert.ok(d.benched.some((p) => p.id === out.id), 'and who goes off');
+  assert.equal(d.clean, false);
+  assert.equal(d.changes, Math.max(d.promoted.length, d.benched.length),
+    'a swap is one job, not two — the count has to match the list');
+});
+
+test('a bench reshuffle is a change, and is only reported once', () => {
+  const c = teamCtx();
+  const base = pickTeam(c);
+  const bench = base.bench.map((p) => p.id);
+  // Keep the reserve keeper first — orderBench enforces it — and swap the rest.
+  const shuffled = [bench[0], bench[2], bench[1], bench[3]];
+  const t = pickTeam(c, { xi: base.xi.map((p) => p.id), bench: shuffled });
+  const d = lineupDiff(c.squad, t);
+  assert.equal(d.promoted.length, 0, 'nobody came on');
+  assert.equal(d.benched.length, 0, 'nobody went off');
+  assert.equal(d.reordered, true);
+  assert.equal(d.changes, 1, 'one job, reported once');
+});
+
+test('an armband move on its own is one change and names both men', () => {
+  const c = teamCtx();
+  const base = pickTeam(c);
+  const other = base.xi.find((p) => p.id !== base.captain.id && p.id !== base.vice.id);
+  const t = pickTeam(c, { xi: base.xi.map((p) => p.id), bench: base.bench.map((p) => p.id),
+    captain: other.id, vice: base.vice.id });
+  const d = lineupDiff(c.squad, t);
+  assert.equal(d.changes, 1);
+  assert.equal(d.captain.id, other.id);
+  assert.ok(d.oldCaptain, 'and says who had it, so the instruction is actionable');
+});
+
+test('no squad means no team to pick, not a crash', () => {
+  const c = buildContext(makeSnapshot());
+  selectEntry(c, false);
+  assert.equal(pickTeam(c), null);
+});
+
+/* ═══════════════ the percentile profile behind the pizza chart ═══════════ */
+
+import { percentileProfile, pizzaMinutes } from '../js/engine.js';
+
+/** A context where enough football has been played to rank anybody. */
+function ranked() {
+  const snap = makeSnapshot();
+  // Give everyone a season rather than a cameo, keeping the spread.
+  snap.players.forEach((p, i) => {
+    p.mins = 400 + (i % 17) * 90;
+    p.xG = ((i % 13) / 10) * (p.mins / 400);
+    p.xA = ((i % 7) / 10) * (p.mins / 400);
+    p.xGI = p.xG + p.xA;
+    p.xGC = (i % 11) * 0.4;
+    p.cs = i % 6;
+    p.saves = p.pos === 'GKP' ? i % 40 : 0;
+    p.bonus = i % 9;
+    p.bps = 40 + (i % 90);
+    p.pts = 20 + (i % 70);
+    p.defCon = i % 30;
+    p.threat = i % 300;
+    p.creativity = i % 250;
+    p.influence = i % 400;
+  });
+  return buildContext(snap);
+}
+
+test('the profile ranks a player inside his own position, never across them', () => {
+  const c = ranked();
+  const mid = c.players.find((p) => p.pos === 'MID' && p.mins >= pizzaMinutes(c));
+  const r = percentileProfile(c, mid);
+  assert.ok(r.enough);
+  assert.equal(r.pos, 'MID');
+  const mids = c.players.filter((p) => p.pos === 'MID' && p.mins >= r.gate).length;
+  assert.equal(r.peers, mids, 'the denominator is the midfielders, not the league');
+  assert.ok(/MIDs/.test(r.note) && String(r.peers) === r.note.match(/the (\d+) MIDs/)[1],
+    'and the note says so with the real number');
+});
+
+test('every percentile is 0-100 and every row keeps the value it came from', () => {
+  const c = ranked();
+  const r = percentileProfile(c, c.players.find((p) => p.pos === 'FWD' && p.mins >= pizzaMinutes(c)));
+  assert.ok(r.rows.length >= 10);
+  for (const row of r.rows) {
+    assert.ok(row.pct >= 0 && row.pct <= 100, `${row.key} in range`);
+    assert.ok(Number.isFinite(row.value), `${row.key} keeps its raw value`);
+    assert.ok(row.text.length > 0, `${row.key} has something to print`);
+    assert.ok(row.short && row.short.length <= 10, `${row.key} has a label that fits a rim`);
+  }
+});
+
+test('expected goals conceded is flipped, so higher is better on every slice', () => {
+  const c = ranked();
+  const peers = c.players.filter((p) => p.pos === 'DEF' && p.mins >= pizzaMinutes(c));
+  const byXGC = peers.slice().sort((a, b) => a.per90.xGC - b.per90.xGC);
+  const tight = percentileProfile(c, byXGC[0]);
+  const leaky = percentileProfile(c, byXGC[byXGC.length - 1]);
+  const get = (r) => r.rows.find((x) => x.key === 'xGC90');
+  assert.ok(get(tight).pct > get(leaky).pct,
+    'the defender who concedes least ranks HIGHER, or one slice out of thirteen means the opposite of the rest');
+  assert.equal(get(tight).invert, true, 'and the row says it was flipped');
+});
+
+test('ties share the mid-rank rather than all sinking to the bottom', () => {
+  const c = ranked();
+  c.players.forEach((p) => { p.per90 = { ...p.per90, saves: 0 }; });
+  const r = percentileProfile(c, c.players.find((p) => p.pos === 'GKP' && p.mins >= pizzaMinutes(c)));
+  const saves = r.rows.find((x) => x.key === 'saves90');
+  assert.ok(saves.pct > 40 && saves.pct < 60,
+    `a field where everyone is level sits mid-table, not 0th (got ${saves.pct})`);
+});
+
+test('too few minutes means no chart and a sentence saying why', () => {
+  const c = ranked();
+  const thin = c.players[0];
+  thin.mins = 40;
+  const r = percentileProfile(c, thin);
+  assert.equal(r.enough, false);
+  assert.equal(r.rows.length, 0);
+  assert.match(r.note, /40 minutes/);
+  assert.match(r.note, /sample/);
+});
+
+test('too few peers is also refused, and says how few', () => {
+  const c = ranked();
+  c.players.forEach((p) => { if (p.pos === 'GKP') p.mins = 30; });
+  const one = c.players.find((p) => p.pos === 'GKP');
+  one.mins = 4000;
+  const r = percentileProfile(c, one);
+  assert.equal(r.enough, false);
+  assert.match(r.note, /nobody to rank him against/);
+});
+
+test('the gate rises with the season rather than staying at a token floor', () => {
+  const early = buildContext(makeSnapshot());
+  const late = buildContext(makeSnapshot());
+  late.gwPlayed = 20;
+  assert.equal(pizzaMinutes(early), 180, 'a floor in August');
+  assert.ok(pizzaMinutes(late) > pizzaMinutes(early), 'and a third of the football by December');
+});
+
+test('the groups partition the rows in order, with no gaps', () => {
+  const c = ranked();
+  for (const pos of ['GKP', 'DEF', 'MID', 'FWD']) {
+    const p = c.players.find((q) => q.pos === pos && q.mins >= pizzaMinutes(c));
+    const r = percentileProfile(c, p);
+    if (!r.enough) continue;
+    assert.equal(r.groups.reduce((s, g) => s + g.count, 0), r.rows.length, `${pos}: every row is in a group`);
+    let at = 0;
+    for (const g of r.groups) {
+      assert.equal(g.from, at, `${pos}: ${g.label} starts where the last group ended`);
+      for (let i = 0; i < g.count; i++) assert.equal(r.rows[at + i].g, g.label);
+      at += g.count;
+    }
+    assert.ok(r.groups.length >= 2, `${pos}: more than one group, or the grouping says nothing`);
+  }
+});
+
+test('a keeper is asked different questions from an outfielder', () => {
+  const c = ranked();
+  const gk = c.players.find((p) => p.pos === 'GKP' && p.mins >= pizzaMinutes(c));
+  const fw = c.players.find((p) => p.pos === 'FWD' && p.mins >= pizzaMinutes(c));
+  const keys = (r) => r.rows.map((x) => x.key);
+  assert.ok(keys(percentileProfile(c, gk)).includes('saves90'), 'saves matter to a keeper');
+  assert.ok(!keys(percentileProfile(c, fw)).includes('saves90'), 'and not to a forward');
+  assert.ok(keys(percentileProfile(c, fw)).includes('xG90'), 'expected goals matter to a forward');
+});
+
+test('no player is not a crash', () => {
+  assert.equal(percentileProfile(ranked(), null), null);
+});
