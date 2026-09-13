@@ -14,11 +14,12 @@ import {
   slotOptions, finishMarket, MARKET_SORTS, fdrAhead, fillSlots,
   seasonReview, setPieces, setPieceText, chipPlanner, adviceReview, leagueEdge, priceOutlook,
   recommendedLineup, autoPickDiff, teamRatings, matchResults, statRows, STAT_COLUMNS,
+  pickTeam, setArmband, lineupDiff, percentileProfile, pizzaMinutes,
   difficultyAudit,
   FDR_SOURCES,
   arrangeXI, swapLineup, applyFormation, availableFormations, xiCounts, formationName,
   FORMATIONS, HIT_COST, FIELD_SIGMA_GW, MAX_PER_CLUB, SQUAD_SHAPE,
-} from './engine.js?v=17';
+} from './engine.js?v=19';
 
 /* ───────────────────────────── helpers ──────────────────────────────── */
 
@@ -68,7 +69,7 @@ const DEFAULTS = {
   pos: 'ALL', sort: 'overall', dir: -1, maxPrice: 16, hideFlag: true, hideOwned: false, q: '',
   pDir: 'all', pQ: '', pMine: false, pOwned: true, pSort: 'ratio', pDirn: -1,
   activePlan: 'A', plans: null, lastSeen: null,
-  sbView: 'pitch', sbBasis: 1, fdr: 'auto',
+  sbView: 'pitch', sbBasis: 1, fdr: 'auto', lineups: null,
   mk: { q: '', pos: 'all', team: '', maxPrice: null, avail: 'all', maxFdr: null, setPiece: null, sort: 'gain' },
 };
 function loadPrefs() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem('fpldesk.prefs') || '{}') }; } catch { return { ...DEFAULTS }; } }
@@ -275,7 +276,11 @@ function badgeRow(traits, opts = {}) {
   const max = opts.limit || traits.length;
   return '<div class="badges">' + traits.slice(0, max).map((t) =>
     `<span class="bdg ${t.tone}" title="${esc(t.label + ' — ' + t.raw)}">` +
-    `<i>${t.icon}</i>${esc(t.label)}<span class="raw">${esc(t.raw)}</span></span>`).join('') + '</div>';
+    // The label is in its own span so it can be the thing that truncates. The
+    // whole point of these badges is that they carry the number they came
+    // from, so the number is the one part that must never be cut.
+    `<i>${t.icon}</i><span class="lb">${esc(t.label)}</span>` +
+    `<span class="raw">${esc(t.raw)}</span></span>`).join('') + '</div>';
 }
 
 /* ══════════════════ EPIC 1 — the decision dashboard ══════════════════ */
@@ -420,7 +425,11 @@ function renderChanges() {
   const groups = [
     { key: 'priceRises', title: 'Price rises', fmt: (r) => `£${r.from.toFixed(1)} → £${r.to.toFixed(1)}`, cls: 'u' },
     { key: 'priceFalls', title: 'Price falls', fmt: (r) => `£${r.from.toFixed(1)} → £${r.to.toFixed(1)}`, cls: 'd' },
-    { key: 'statusChanges', title: 'Availability', fmt: (r) => esc(r.news || (r.to === 'a' ? 'back available' : 'flagged')), cls: (r) => (r.worse ? 'd' : 'u') },
+    // The only group whose value is a SENTENCE rather than a figure. A price
+    // move must never wrap or shrink; a line of news must, or it runs off the
+    // side of a three-column layout.
+    { key: 'statusChanges', title: 'Availability', prose: true,
+      fmt: (r) => esc(r.news || (r.to === 'a' ? 'back available' : 'flagged')), cls: (r) => (r.worse ? 'd' : 'u') },
     { key: 'formMovers', title: 'Form swings', fmt: (r) => `${r.from.toFixed(1)} → ${r.to.toFixed(1)}`, cls: (r) => (r.delta > 0 ? 'u' : 'd') },
     { key: 'ownershipMovers', title: 'Ownership swings', fmt: (r) => `${r.from.toFixed(1)}% → ${r.to.toFixed(1)}%`, cls: (r) => (r.delta > 0 ? 'u' : 'd') },
   ];
@@ -457,7 +466,7 @@ function renderChanges() {
           `<span class="who" data-pid="${r.id}">${esc(r.name)}</span>` +
           (mine.has(r.id) ? '<span class="tag mine">yours</span>' : '') +
           (w ? `<span class="chg-when" title="${esc(w.tip)}">${esc(w.text)}${w.wide ? ' ±' + esc(w.wide) : ''}</span>` : '') +
-          `<span class="chg-v ${cls}">${g.fmt(r)}</span></li>`;
+          `<span class="chg-v ${cls}${g.prose ? ' prose' : ''}">${g.fmt(r)}</span></li>`;
       }).join('') + '</ul></div>';
   }).join('');
 
@@ -1476,6 +1485,275 @@ function setFdrSource(key) {
   renderAll();
 }
 
+/* ═══════════════════════════════ pick team ══════════════════════════════ */
+
+/**
+ * Who plays this week, which is a different question from who is in the squad.
+ *
+ * The planner owns transfers; this owns the eleven, the bench order and the
+ * armbands, and nothing here can add or remove a player. Keeping them apart
+ * matters because the two decisions have different deadlines in your head: you
+ * transfer occasionally and you pick a team every single week.
+ *
+ * It opens on the team FPL already holds, so the change list starts empty and
+ * everything in it afterwards is something you did.
+ */
+let PT_SEL = null;      // the shirt waiting for a partner, or null
+let PT_MSG = '';        // the one-line answer to the last thing you tried
+
+/** The lineup you have set here, per manager, or null if you have set none. */
+function ptSaved() {
+  const key = CTX.entry ? CTX.entry.key : null;
+  if (!key) return null;
+  const all = prefs.lineups || {};
+  return all[key] || null;
+}
+function ptSave(next) {
+  const key = CTX.entry ? CTX.entry.key : null;
+  if (!key) return;
+  prefs.lineups = { ...(prefs.lineups || {}), [key]: next };
+  savePrefs();
+}
+function ptClear() {
+  const key = CTX.entry ? CTX.entry.key : null;
+  if (!key) return;
+  const all = { ...(prefs.lineups || {}) };
+  delete all[key];
+  prefs.lineups = all;
+  savePrefs();
+}
+
+/** Whatever chip the active plan has staged for this gameweek, if any. */
+function ptChip(gw) {
+  const plan = getPlans()[prefs.activePlan];
+  const wk = plan && (plan.weeks || []).find((w) => w.gw === gw);
+  return wk && wk.chip ? wk.chip : null;
+}
+
+function renderPickTeam() {
+  const sec = $('#pickteam');
+  if (!CTX.squad.length) { sec.hidden = true; return; }
+  sec.hidden = false;
+
+  const gw = GW ? GW.targetGw : CTX.gws[0];
+  const gwIndex = Math.max(0, CTX.gws.indexOf(gw));
+  const chip = ptChip(gw);
+  const team = pickTeam(CTX, ptSaved(), { gwIndex, chip });
+  if (!team) { sec.hidden = true; return; }
+
+  const diff = lineupDiff(CTX.squad, team);
+  const shapes = availableFormations(CTX.squad.map((s) => s.player));
+
+  $('#ptNote').innerHTML =
+    `<span>GW${gw}</span>` +
+    // The deadline belongs on this screen more than anywhere else: it is the
+    // moment every decision here stops being changeable.
+    (GW && GW.deadlineText ? `<span>deadline ${esc(GW.deadlineText)}</span>` : '') +
+    `<span>${esc(team.formation || '—')}</span>` +
+    `<span title="${esc(chip ? CHIPS[chip].name + ' counted' : 'Your eleven plus the captain counted twice')}">` +
+    `${team.points.toFixed(1)} projected</span>` +
+    (chip ? `<span class="ptchip">${esc(CHIPS[chip].name)}</span>` : '') +
+    `<span>${diff.clean ? 'matches your team on FPL' : `${diff.changes} change${diff.changes === 1 ? '' : 's'} to make`}</span>`;
+
+  $('#ptShape').innerHTML = shapes.map((f) =>
+    `<option value="${f}"${f === team.formation ? ' selected' : ''}>${f}</option>`).join('');
+  $('#ptHint').textContent = PT_MSG ||
+    'Tap two players to swap them. The armbands are the C and V on each shirt.';
+  $('#ptHint').className = 'ptmsg' + (PT_MSG ? ' say' : '');
+  PT_MSG = '';
+
+  const lines = { GKP: [], DEF: [], MID: [], FWD: [] };
+  team.xi.forEach((p) => lines[p.pos].push(ptCard(p, team, false, 0)));
+
+  let html = `<div class="pitch"><span class="shape">${esc(team.formation || '')}</span>`;
+  ['GKP', 'DEF', 'MID', 'FWD'].forEach((pos) => {
+    if (lines[pos].length) html += `<div class="line">${lines[pos].join('')}</div>`;
+  });
+  html += '</div><div class="bench"><span class="lab">' +
+    (chip === 'bboost'
+      ? 'Bench — all four score this week'
+      : 'Bench — the order they come on') +
+    '</span><div class="line">' +
+    team.bench.map((p, i) => ptCard(p, team, true, i)).join('') + '</div></div>';
+  $('#ptPitch').innerHTML = html;
+
+  renderPtChanges(diff, team, gw);
+
+  $('#ptCaveat').textContent =
+    'FPL Desk can read your team but not change it — the API is read-only — so nothing here ' +
+    'reaches the official site. This is where you decide, and the list above is what to go ' +
+    'and do. Your choices are kept in this browser, and the gameweek score you eventually ' +
+    'get will be whatever you actually set on FPL.';
+
+  wirePickTeam(team, gwIndex);
+}
+
+/** One shirt, with its own armband controls. */
+function ptCard(p, team, benched, order) {
+  const isCap = team.captain && team.captain.id === p.id;
+  const isVice = team.vice && team.vice.id === p.id;
+  const pick = isCap ? { captain: true, multiplier: team.capMult }
+    : isVice ? { vice: true, multiplier: 1 } : null;
+  const card = manCard(p, pick, { projIdx: team.gwIndex, gw: team.gw, swappable: true,
+    selected: PT_SEL === p.id });
+
+  // The bench number is the order they come on, and the reserve keeper is not
+  // in that queue — he only ever replaces the keeper, so numbering him 1 would
+  // say something untrue about when he plays.
+  const num = benched && p.pos !== 'GKP' ? `<span class="ptnum">${order}</span>`
+    : benched ? '<span class="ptnum gk">GK</span>' : '';
+
+  /* The bench keeps its armband controls, dimmed.
+   *
+   * An armband on a bench player is not a thing FPL will honour, so the buttons
+   * cannot work there — but hiding them makes the rule invisible and leaves you
+   * wondering why the man you want cannot have it. Same principle as the market,
+   * where a player you cannot buy still appears with the reason: show it, refuse
+   * it, and say which rule. */
+  const band = (role, on, label) =>
+    `<button class="ptb${on ? ' on' : ''}${benched ? ' off' : ''}" data-band="${role}" ` +
+    `data-pid="${p.id}" aria-pressed="${on}" title="${esc(benched
+      ? `${p.name} is on the bench — only someone starting can wear the armband`
+      : on ? `${p.name} is ${label}` : `Make ${p.name} ${label}`)}">${role === 'captain' ? 'C' : 'V'}</button>`;
+
+  return '<div class="manwrap ptman">' + card + num +
+    '<span class="ptband">' + band('captain', isCap, 'captain') +
+    band('vice', isVice, 'vice-captain') + '</span></div>';
+}
+
+/**
+ * The change list — the only output this screen can honestly produce.
+ *
+ * Phrased as instructions for the official site rather than as a summary,
+ * because that is what you are going to do with it.
+ */
+function renderPtChanges(diff, team, gw) {
+  const box = $('#ptChanges');
+  if (diff.clean) {
+    box.innerHTML = '<div class="ptdone"><span class="lab">Nothing to change</span>' +
+      '<p>This is the team you already have on FPL. Move someone, or change the armband, ' +
+      'and the jobs appear here.</p></div>';
+    return;
+  }
+  const name = (p) => `<button class="lk" data-pid="${p.id}">${esc(p.name)}</button>`;
+  const rows = [];
+  const pairs = Math.min(diff.promoted.length, diff.benched.length);
+  for (let i = 0; i < pairs; i++) {
+    rows.push(`<li><span class="jn">Swap</span><span>${name(diff.benched[i])} off, ` +
+      `${name(diff.promoted[i])} on</span></li>`);
+  }
+  diff.promoted.slice(pairs).forEach((p) =>
+    rows.push(`<li><span class="jn">Start</span><span>${name(p)}</span></li>`));
+  diff.benched.slice(pairs).forEach((p) =>
+    rows.push(`<li><span class="jn">Bench</span><span>${name(p)}</span></li>`));
+  if (diff.captain) {
+    rows.push(`<li><span class="jn">Captain</span><span>${name(diff.captain)}` +
+      (diff.oldCaptain ? `, instead of ${name(diff.oldCaptain)}` : '') + '</span></li>');
+  }
+  if (diff.vice) {
+    rows.push(`<li><span class="jn">Vice</span><span>${name(diff.vice)}` +
+      (diff.oldVice ? `, instead of ${name(diff.oldVice)}` : '') + '</span></li>');
+  }
+  if (diff.reordered) {
+    rows.push('<li><span class="jn">Bench order</span><span>' +
+      team.bench.filter((p) => p.pos !== 'GKP').map((p, i) => `${i + 1}. ${esc(p.name)}`).join(', ') +
+      '</span></li>');
+  }
+
+  box.innerHTML = '<div class="ptjobs"><span class="lab">To do on FPL before the GW' + gw +
+    ' deadline</span><ol>' + rows.join('') + '</ol>' +
+    '<div class="ptgo">' +
+      '<a class="btn go" href="https://fantasy.premierleague.com/my-team" target="_blank" ' +
+      'rel="noopener">Open Pick Team on FPL</a>' +
+      '<button class="btn" id="ptCopy">Copy the list</button>' +
+      '<span class="ptmsg" id="ptCopied"></span>' +
+    '</div>' +
+    '<p class="note">Pairing the swaps is our arrangement of the same set — on FPL you tap ' +
+    'any two players to exchange them, so take these as who should end up where.</p></div>';
+
+  $$('#ptChanges [data-pid]').forEach((el) =>
+    el.addEventListener('click', () => openPlayer(Number(el.dataset.pid))));
+
+  /* The list is worth carrying to another tab or another device, and retyping
+   * four substitutions from memory is exactly where one gets lost. */
+  const copy = $('#ptCopy');
+  if (copy) {
+    copy.onclick = async () => {
+      const text = `FPL Desk — GW${gw} team\n` +
+        [...box.querySelectorAll('ol li')].map((li, i) =>
+          `${i + 1}. ${li.querySelector('.jn').textContent}: ` +
+          `${li.lastElementChild.textContent.replace(/\s+/g, ' ').trim()}`).join('\n');
+      const done = (ok) => {
+        const m = $('#ptCopied');
+        if (m) m.textContent = ok ? 'Copied.' : 'Could not copy — select the list instead.';
+      };
+      try { await navigator.clipboard.writeText(text); done(true); } catch { done(false); }
+    };
+  }
+}
+
+function wirePickTeam(team, gwIndex) {
+  const redraw = () => renderPickTeam();
+  const ids = (arr) => arr.map((p) => p.id);
+  const store = (xi, bench, captain, vice) => {
+    ptSave({ xi, bench,
+      captain: captain != null ? captain : (team.captain ? team.captain.id : null),
+      vice: vice != null ? vice : (team.vice ? team.vice.id : null) });
+  };
+
+  $('#ptShape').onchange = (e) => {
+    const r = applyFormation(team, e.target.value, gwIndex);
+    if (!r.ok) { PT_MSG = r.error; redraw(); return; }
+    store(r.xi, r.bench); PT_SEL = null; redraw();
+  };
+
+  $('#ptAuto').onclick = () => {
+    // The optimiser for THIS week, armbands included — which is a different
+    // eleven from the one you have, or it would not be worth a button.
+    const best = arrangeXI(CTX.squad.map((s) => s.player), gwIndex);
+    if (!best) { PT_MSG = 'Nothing to pick from.'; redraw(); return; }
+    const d = autoPickDiff(team.xi, best, gwIndex);
+    store(ids(best.xi), ids(best.bench),
+      best.captain ? best.captain.id : null, best.vice ? best.vice.id : null);
+    PT_SEL = null;
+    // Deliberately no points figure here: the header above already carries the
+    // projection, and two numbers for one eleven — one with the armband
+    // doubled and one without — is how a screen stops being believed.
+    PT_MSG = d.same
+      ? `Already the best eleven for GW${team.gw}.`
+      : `Auto-picked ${best.formation} — ${d.changed} player${d.changed === 1 ? '' : 's'} in.`;
+    redraw();
+  };
+
+  $('#ptReset').onclick = () => {
+    ptClear(); PT_SEL = null;
+    PT_MSG = 'Back to the team you have on FPL.';
+    redraw();
+  };
+
+  const tap = (id) => {
+    if (PT_SEL != null && PT_SEL !== id) {
+      const r = swapLineup(team, PT_SEL, id);
+      if (r.ok) { store(r.xi, r.bench); PT_SEL = null; redraw(); return; }
+      PT_MSG = r.error;
+    }
+    PT_SEL = PT_SEL === id ? null : id;
+    redraw();
+  };
+
+  $$('#ptPitch [data-swapout]').forEach((b) =>
+    b.addEventListener('click', () => tap(Number(b.dataset.swapout))));
+
+  $$('#ptPitch [data-band]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const r = setArmband(team, Number(b.dataset.pid), b.dataset.band);
+    if (!r.ok) { PT_MSG = r.error; redraw(); return; }
+    store(ids(team.xi), ids(team.bench), r.captain, r.vice);
+    if (r.swapped) PT_MSG = 'Swapped the two armbands over.';
+    redraw();
+  }));
+}
+
 /* ═══════════════════════════════ stats ═════════════════════════════════ */
 
 let ST_TAB = 'teams';
@@ -1743,6 +2021,10 @@ function openBestXI(gw) {
     '<div class="line">' + rec.bench.map((p) => card(p, null)).join('') + '</div></div>';
 
   const doubled = rec.captainPoints * 2;
+  // Pick team can only rearrange the squad you own, so a recommendation built
+  // on staged moves or unfilled sales is not something it can accept.
+  const canApply = !rec.staged.length && !(rec.holes && rec.holes.length) &&
+    rec.gw === (GW ? GW.targetGw : CTX.gws[0]);
   const note = [
     `${rec.formation || 'short'} · ${(rec.points + rec.captainPoints).toFixed(1)} projected with the armband`,
     // A sale with nobody bought yet is not a staged transfer, but it is very
@@ -1786,11 +2068,36 @@ function openBestXI(gw) {
       '<p class="note">Highest-projecting legal eleven of the eight FPL formations, for GW' +
         `${rec.gw}. The armband goes on the best single-week projection — captaincy is a one-week bet ` +
         'even when the eleven is picked over a longer run.</p>' +
+      // Advice you cannot act on is half a feature. The button only appears
+      // when this eleven is drawn from the squad you own — an eleven built
+      // around staged transfers cannot be set on a team that has not made them.
+      (canApply
+        ? '<div class="ptgo"><button class="btn go" id="bxApply">Use this in Pick team</button>' +
+          '<span class="ptmsg">Sets the eleven, the bench order and both armbands. ' +
+          'Reset puts it back.</span></div>'
+        : '<p class="note">Staged transfers mean this eleven is not one you could field today, ' +
+          'so it cannot be handed to Pick team — make the moves on FPL first.</p>') +
     '</div>',
   });
 
   $$('#dBody .man[data-pid]').forEach((el) =>
     el.addEventListener('click', () => openPlayer(Number(el.dataset.pid))));
+
+  const apply = $('#bxApply');
+  if (apply) {
+    apply.onclick = () => {
+      ptSave({
+        xi: rec.xi.map((p) => p.id), bench: rec.bench.map((p) => p.id),
+        captain: rec.captain ? rec.captain.id : null,
+        vice: rec.vice ? rec.vice.id : null,
+      });
+      PT_MSG = `Taken from the recommendation for GW${rec.gw}.`;
+      closeDrawer();
+      renderPickTeam();
+      const sec = document.getElementById('pickteam');
+      if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+  }
 }
 
 /* ═══════════════════════════ your season ═══════════════════════════════ */
@@ -2688,6 +2995,187 @@ function barChart(data, opts = {}) {
     `<line class="axis" x1="${Math.max(0, x0 - 6)}" y1="${h - pad}" x2="${Math.min(w, x0 + span + 6)}" y2="${h - pad}"/>${bars}</svg>`;
 }
 
+/* ══════════════════════ the percentile profile ═════════════════════════ */
+
+/**
+ * A pizza chart, after mplsoccer's PyPizza.
+ *
+ * Thirteen parameters around a circle, each slice as long as the player's
+ * percentile against the players he is competing with. It is the standard
+ * scouting-report form and it is the right one here: the question "where is he
+ * strong" is answered by a shape, and thirteen bars in a column is a shape
+ * nobody reads as one.
+ *
+ * Radius encodes percentile, which means AREA grows faster than the number
+ * does — the known weakness of every radial chart. Three things pay for it:
+ * every slice carries its own percentile at the end, rings at 25/50/75 give a
+ * positional read that needs no arithmetic, and the same numbers appear as a
+ * table underneath. The chart is the shape; the numbers are the fact.
+ *
+ * No group colours. Every chart in this tool is ink, because colour here means
+ * fixture difficulty, price direction or availability, and a fourth meaning
+ * would cost more than it bought. Groups are separated by a heavier boundary
+ * line and named around the rim. In comparison mode the second player is drawn
+ * as a stroked arc rather than a second fill — a different MARK, so the two are
+ * told apart by shape as well as by colour and survive any colour vision.
+ */
+function pizzaChart(profile, compare) {
+  const rows = profile.rows;
+  const n = rows.length;
+  if (!n) return '';
+  // The viewBox has to hold the group arc as well as the chart: R + the radial
+  // labels + the group band. Sized from those, not guessed.
+  const W = 500, C = W / 2, R = 130, INNER = 25, PAD = 0.9;
+  const step = 360 / n;
+  const rad = (deg) => ((deg - 90) * Math.PI) / 180;
+  const pt = (deg, r) => [C + r * Math.cos(rad(deg)), C + r * Math.sin(rad(deg))];
+  const f = (v) => v.toFixed(2);
+
+  /** An annular sector: the arc from a0 to a1 between radii r0 and r1. */
+  const sector = (a0, a1, r0, r1) => {
+    const [x0, y0] = pt(a0, r1), [x1, y1] = pt(a1, r1);
+    const [x2, y2] = pt(a1, r0), [x3, y3] = pt(a0, r0);
+    const big = a1 - a0 > 180 ? 1 : 0;
+    return `M${f(x0)},${f(y0)} A${f(r1)},${f(r1)} 0 ${big} 1 ${f(x1)},${f(y1)} ` +
+      `L${f(x2)},${f(y2)} A${f(r0)},${f(r0)} 0 ${big} 0 ${f(x3)},${f(y3)} Z`;
+  };
+  const at = (pct) => INNER + ((R - INNER) * Math.max(0, Math.min(100, pct))) / 100;
+
+  const cmpBy = new Map((compare ? compare.rows : []).map((r) => [r.key + r.g, r]));
+
+  let slices = '', blanks = '', labels = '', values = '', cmpMarks = '';
+  rows.forEach((r, i) => {
+    const a0 = i * step + PAD, a1 = (i + 1) * step - PAD;
+    const mid = i * step + step / 2;
+    const rv = at(r.pct);
+    const tip = `${r.label} — ${r.text}, ${ordinal(r.pct)} percentile of ${profile.peers} ${profile.pos}s`;
+
+    blanks += `<path class="pz-blank" d="${sector(a0, a1, rv, R)}"/>`;
+    slices += `<path class="pz-slice" d="${sector(a0, a1, INNER, rv)}"><title>${esc(tip)}</title></path>`;
+
+    // The percentile sits just outside its own slice, which is what makes the
+    // radius readable without measuring it against the rings.
+    const [lx, ly] = pt(mid, Math.min(R - 9, rv + 11));
+    values += `<text class="pz-val" x="${f(lx)}" y="${f(ly)}" text-anchor="middle" dominant-baseline="middle">${r.pct}</text>`;
+
+    // Param names ride the radius, flipped on the left half so none is upside
+    // down — a label you have to tilt your head for is not a label.
+    const [tx, ty] = pt(mid, R + 10);
+    const flip = mid > 180;
+    const rot = flip ? mid + 90 : mid - 90;
+    labels += `<text class="pz-lab" x="${f(tx)}" y="${f(ty)}" ` +
+      `text-anchor="${flip ? 'end' : 'start'}" dominant-baseline="middle" ` +
+      `transform="rotate(${f(rot)} ${f(tx)} ${f(ty)})">${esc(r.short || r.label)}</text>`;
+
+    const c = cmpBy.get(r.key + r.g);
+    if (c) {
+      const cr = at(c.pct);
+      const [ax, ay] = pt(a0, cr), [bx, by] = pt(a1, cr);
+      const [mx, my] = pt(mid, cr);
+      cmpMarks += `<path class="pz-cmp" d="M${f(ax)},${f(ay)} A${f(cr)},${f(cr)} 0 0 1 ${f(bx)},${f(by)}">` +
+        `<title>${esc(`${whoLabel(compare.player)} — ${c.text}, ${ordinal(c.pct)} percentile`)}</title></path>` +
+        `<circle class="pz-cmp-dot" cx="${f(mx)}" cy="${f(my)}" r="2.6"/>`;
+    }
+  });
+
+  // Rings you can read a slice against, and the boundary between groups.
+  let rings = [25, 50, 75].map((q) =>
+    `<circle class="pz-ring" cx="${C}" cy="${C}" r="${f(at(q))}"/>`).join('') +
+    `<circle class="pz-outer" cx="${C}" cy="${C}" r="${R}"/>` +
+    `<circle class="pz-inner" cx="${C}" cy="${C}" r="${INNER}"/>`;
+  /* Group names ride a curved path OUTSIDE the radial labels.
+   *
+   * Set radially at the same distance they collided with the parameter names,
+   * which is the sort of thing you only find by rendering it and looking. On an
+   * arc at R+72 they clear the longest label and read as what they are: a band
+   * covering the slices beneath them. */
+  let bounds = '', defs = '';
+  const GR = R + 70;
+  profile.groups.forEach((g, gi) => {
+    const a = g.from * step;
+    const [x0, y0] = pt(a, INNER), [x1, y1] = pt(a, R);
+    bounds += `<line class="pz-bound" x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}"/>`;
+
+    const spanDeg = g.count * step;
+    const mid = a + spanDeg / 2;
+    // Below the horizon the arc must be drawn the other way round or the text
+    // hangs upside down under it.
+    const under = mid > 90 && mid < 270;
+    const half = Math.min(spanDeg, 150) / 2;
+    const [ax, ay] = pt(mid + (under ? half : -half), GR);
+    const [bx, by] = pt(mid + (under ? -half : half), GR);
+    const sweep = under ? 0 : 1;
+    defs += `<path id="pzg${gi}" d="M${f(ax)},${f(ay)} A${f(GR)},${f(GR)} 0 0 ${sweep} ${f(bx)},${f(by)}"/>`;
+    bounds += `<text class="pz-grp"><textPath href="#pzg${gi}" startOffset="50%" ` +
+      `text-anchor="middle">${esc(g.label)}</textPath></text>`;
+  });
+
+  const label = compare
+    ? `${whoLabel(profile.player)} against ${whoLabel(compare.player)}, percentile among ${profile.pos}s`
+    : `${profile.player.name}, percentile against ${profile.peers} ${profile.pos}s on ${n} measures`;
+
+  return `<svg class="pizza" viewBox="0 0 ${W} ${W}" role="img" aria-label="${esc(label)}">` +
+    `<defs>${defs}</defs>` +
+    `${rings}${blanks}${slices}${cmpMarks}${bounds}${values}${labels}</svg>`;
+}
+
+/**
+ * A name you can tell apart from another name.
+ *
+ * Surnames repeat — the league has had two Silvas and three Costas — so a
+ * legend or a column header carrying only a surname can end up saying the same
+ * word twice about two different players.
+ */
+function whoLabel(p) {
+  const t = TEAM.get(p.team) || {};
+  return `${p.name}${t.short ? ` (${t.short})` : ''}`;
+}
+
+/** The same numbers as a table, because the chart is a shape and this is the fact. */
+function pizzaTable(profile, compare) {
+  const cmpBy = new Map((compare ? compare.rows : []).map((r) => [r.key + r.g, r]));
+  let last = null;
+  return '<div class="tw"><table class="pztab"><thead><tr>' +
+    '<th class="l">Measure</th><th>Value</th><th>Pct</th>' +
+    (compare ? `<th>${esc(whoLabel(compare.player))}</th><th>Pct</th>` : '') +
+    '</tr></thead><tbody>' +
+    profile.rows.map((r) => {
+      const head = r.g !== last ? `<tr class="pzgrp"><td class="l" colspan="${compare ? 5 : 3}">${esc(r.g)}</td></tr>` : '';
+      last = r.g;
+      const c = cmpBy.get(r.key + r.g);
+      return head + '<tr>' +
+        `<td class="l">${esc(r.label)}${r.invert ? '<span class="pzinv" title="Lower is better, so the ranking is flipped">↓</span>' : ''}</td>` +
+        `<td class="num">${esc(r.text)}</td><td class="num"><b>${r.pct}</b></td>` +
+        (compare ? `<td class="num">${c ? esc(c.text) : '—'}</td><td class="num"><b>${c ? c.pct : '—'}</b></td>` : '') +
+        '</tr>';
+    }).join('') + '</tbody></table></div>';
+}
+
+/**
+ * The profile block for the player drawer: chart, legend, table, and a way to
+ * put someone beside him.
+ */
+function pizzaBlock(profile, compare) {
+  if (!profile) return '';
+  if (!profile.enough) {
+    return '<div class="blk"><span class="lab">Percentile profile</span>' +
+      `<p class="note">${esc(profile.note)}</p></div>`;
+  }
+  const legend = compare
+    ? '<div class="pzkey">' +
+      `<span class="pzk"><i class="fill"></i>${esc(whoLabel(profile.player))}</span>` +
+      `<span class="pzk"><i class="arc"></i>${esc(whoLabel(compare.player))}</span></div>`
+    : '';
+  return '<div class="blk"><span class="lab">Percentile profile</span>' +
+    '<div class="pzwrap">' + pizzaChart(profile, compare) + '</div>' + legend +
+    `<div class="pzcmp"><label for="pzWith">Compare with</label>` +
+    `<select id="pzWith" data-base="${profile.player.id}"></select>` +
+    (compare ? '<button class="btn" id="pzClear">Clear</button>' : '') + '</div>' +
+    pizzaTable(profile, compare) +
+    `<p class="assume pznote">${esc(profile.note)} Each slice is as long as the percentile ` +
+    'printed at its end; the rings are the 25th, 50th and 75th.</p></div>';
+}
+
 const tipEl = () => $('#tip');
 function showTip(html, x, y) {
   const t = tipEl(); t.innerHTML = html; t.classList.add('on');
@@ -2718,8 +3206,14 @@ function closeDrawer() {
 }
 
 /** Player detail, now leading with why the algorithm rates him. */
-function openPlayer(pid) {
+/** Who the open player is being measured against, if anyone. */
+let PZ_WITH = null;
+
+function openPlayer(pid, opts = {}) {
   const p = CTX.byId.get(pid); if (!p) return;
+  // A comparison belongs to one pairing. Opening a different player clears it,
+  // because carrying it over would silently compare two men you never chose.
+  if (!opts.keepCompare) PZ_WITH = null;
   const t = TEAM.get(p.team) || {}, det = DETAILS[pid], s = p.scores, st = priceState(p);
   const cat = categorise(p);
   let b = '';
@@ -2784,8 +3278,43 @@ function openPlayer(pid) {
   b += `<div class="blk"><span class="lab">Next ${p.fixtures.length} fixtures</span><div class="fxlist">` +
     p.fixtures.map((f) => gwChip(f)).join('') + '</div></div>';
 
+  const profile = percentileProfile(CTX, p);
+  const other = PZ_WITH != null ? CTX.byId.get(PZ_WITH) : null;
+  const cmp = other && other.pos === p.pos ? percentileProfile(CTX, other) : null;
+  b += pizzaBlock(profile, cmp && cmp.enough ? cmp : null);
+
   openDrawer({ title: p.full || p.name, meta: `${t.name || ''} · ${p.pos} · £${p.price.toFixed(1)}m` +
     (CTX.squad.some((s2) => s2.id === p.id) ? ' · in your squad' : ''), body: b });
+
+  wirePizza(p, profile);
+}
+
+/**
+ * The compare picker.
+ *
+ * Only players who clear the same minutes gate are offered, because the chart
+ * cannot draw anyone else and a menu full of names that produce nothing is a
+ * menu that lies about what it does.
+ */
+function wirePizza(p, profile) {
+  const sel = $('#pzWith');
+  if (!sel || !profile || !profile.enough) return;
+  const gate = pizzaMinutes(CTX);
+  const peers = CTX.players
+    .filter((q) => q.pos === p.pos && q.id !== p.id && (q.mins || 0) >= gate)
+    .sort((a, b) => (b.pts || 0) - (a.pts || 0))
+    .slice(0, 80);
+  sel.innerHTML = '<option value="">nobody</option>' + peers.map((q) => {
+    const tm = TEAM.get(q.team) || {};
+    return `<option value="${q.id}"${PZ_WITH === q.id ? ' selected' : ''}>` +
+      `${esc(q.name)} · ${esc(tm.short || '')} · £${q.price.toFixed(1)}</option>`;
+  }).join('');
+  sel.onchange = () => {
+    PZ_WITH = sel.value ? Number(sel.value) : null;
+    openPlayer(p.id, { keepCompare: true });
+  };
+  const clear = $('#pzClear');
+  if (clear) clear.onclick = () => { PZ_WITH = null; openPlayer(p.id, { keepCompare: true }); };
 }
 
 /* ──────────────────────────── wiring ────────────────────────────────── */
@@ -3289,6 +3818,7 @@ function renderAll() {
   renderDashboard();
   renderScoreBug();
   renderSquad();
+  renderPickTeam();
   renderSeason();
   renderStats();
   renderRivals();
