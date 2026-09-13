@@ -815,6 +815,152 @@ export function difficultyAudit(ctx, weeks = 6) {
   };
 }
 
+/* ═══════════════════ the percentile profile (pizza chart) ════════════════ */
+
+/**
+ * The parameters a profile is drawn from, by position.
+ *
+ * Grouped the way FPL points are actually earned rather than the way a scouting
+ * report groups them: what wins attacking returns, what wins clean sheets and
+ * defensive contributions, and what has actually landed in the points column.
+ * A keeper gets a different first group because "expected goals" is not a
+ * question anyone asks about him.
+ *
+ * `invert: true` marks a parameter where LOW is good. Expected goals conceded is
+ * the only one, and it has to be flipped before ranking — a chart where one
+ * slice out of thirteen means the opposite of the other twelve is not a chart,
+ * it is a trap.
+ */
+const PIZZA_PARAMS = {
+  GKP: [
+    { g: 'Shot-stopping', key: 'saves90', label: 'Saves / 90', short: 'Saves/90', dp: 2 },
+    { g: 'Shot-stopping', key: 'xGC90', label: 'xGC / 90', short: 'xGC/90', dp: 2, invert: true },
+    { g: 'Shot-stopping', key: 'cs90', label: 'Clean sheets / 90', short: 'CS/90', dp: 2 },
+    { g: 'Involvement', key: 'defCon90', label: 'Def. actions / 90', short: 'DefCon/90', dp: 2 },
+    { g: 'Involvement', key: 'influence', label: 'Influence', short: 'Influence', dp: 0 },
+    { g: 'Returns', key: 'pts90', label: 'Points / 90', short: 'Pts/90', dp: 2 },
+    { g: 'Returns', key: 'bonus90', label: 'Bonus / 90', short: 'Bonus/90', dp: 2 },
+    { g: 'Returns', key: 'bps90', label: 'BPS / 90', short: 'BPS/90', dp: 1 },
+    { g: 'Returns', key: 'minsPct', label: 'Minutes share', short: 'Minutes', dp: 0, pct: true },
+    { g: 'Returns', key: 'perM', label: 'Points per £m', short: 'Pts/£m', dp: 1 },
+  ],
+  OUT: [
+    { g: 'Attacking', key: 'xG90', label: 'xG / 90', short: 'xG/90', dp: 2 },
+    { g: 'Attacking', key: 'xA90', label: 'xA / 90', short: 'xA/90', dp: 2 },
+    { g: 'Attacking', key: 'xGI90', label: 'xGI / 90', short: 'xGI/90', dp: 2 },
+    { g: 'Attacking', key: 'threat', label: 'Threat', short: 'Threat', dp: 0 },
+    { g: 'Attacking', key: 'creativity', label: 'Creativity', short: 'Creativity', dp: 0 },
+    { g: 'Defending', key: 'xGC90', label: 'xGC / 90', short: 'xGC/90', dp: 2, invert: true },
+    { g: 'Defending', key: 'cs90', label: 'Clean sheets / 90', short: 'CS/90', dp: 2 },
+    { g: 'Defending', key: 'defCon90', label: 'Def. actions / 90', short: 'DefCon/90', dp: 2 },
+    { g: 'Returns', key: 'pts90', label: 'Points / 90', short: 'Pts/90', dp: 2 },
+    { g: 'Returns', key: 'bonus90', label: 'Bonus / 90', short: 'Bonus/90', dp: 2 },
+    { g: 'Returns', key: 'bps90', label: 'BPS / 90', short: 'BPS/90', dp: 1 },
+    { g: 'Returns', key: 'minsPct', label: 'Minutes share', short: 'Minutes', dp: 0, pct: true },
+    { g: 'Returns', key: 'perM', label: 'Points per £m', short: 'Pts/£m', dp: 1 },
+  ],
+};
+
+/** A player's raw value for every parameter a profile can rank. */
+function pizzaValues(p) {
+  const per = p.per90 || {};
+  const games = Math.max(1, (p.mins || 0) / 90);
+  return {
+    xG90: per.xG || 0, xA90: per.xA || 0, xGI90: per.xGI || 0,
+    xGC90: per.xGC || 0, saves90: per.saves || 0, defCon90: per.defCon || 0,
+    cs90: (p.cs || 0) / games,
+    bonus90: (p.bonus || 0) / games,
+    bps90: (p.bps || 0) / games,
+    pts90: (p.pts || 0) / games,
+    threat: Number(p.threat) || 0,
+    creativity: Number(p.creativity) || 0,
+    influence: Number(p.influence) || 0,
+    minsPct: p.minsPct != null ? p.minsPct : 0,
+    perM: p.price ? (p.pts || 0) / p.price : 0,
+  };
+}
+
+/**
+ * The minutes a player needs before ranking him against his peers means
+ * anything.
+ *
+ * A third of the available minutes. One good cameo puts a substitute at the top
+ * of every per-90 table in the game, and a chart that says a player who has
+ * played 40 minutes is the best finisher in the league is worse than no chart.
+ * The floor is 180 so that the gate is not meaningless in August.
+ */
+export function pizzaMinutes(ctx) {
+  return Math.max(180, Math.round((ctx.gwPlayed || 1) * 90 / 3));
+}
+
+/**
+ * Where a player ranks against the players he is actually competing with.
+ *
+ * Percentiles are taken **within his own position**, because a defender's
+ * expected goals compared against forwards would say nothing except that he is a
+ * defender. Ties share the mid-rank, which is the standard treatment and stops a
+ * field of zeroes from all reading as the 0th percentile.
+ *
+ * Returns null rather than a chart when the player has not played enough for a
+ * rank to mean anything — the honest answer to "how good is he" after forty
+ * minutes is that nobody knows.
+ */
+export function percentileProfile(ctx, player, opts = {}) {
+  if (!player) return null;
+  const gate = opts.minMinutes != null ? opts.minMinutes : pizzaMinutes(ctx);
+  const pos = player.pos;
+  const peers = ctx.players.filter((q) => q.pos === pos && (q.mins || 0) >= gate);
+  const params = PIZZA_PARAMS[pos === 'GKP' ? 'GKP' : 'OUT'];
+
+  if ((player.mins || 0) < gate) {
+    return { player, pos, gate, peers: peers.length, enough: false, rows: [], groups: [],
+      note: `${player.name} has played ${player.mins} minutes. A percentile needs ` +
+        `${gate} before it says anything about him rather than about his sample.` };
+  }
+  if (peers.length < 5) {
+    return { player, pos, gate, peers: peers.length, enough: false, rows: [], groups: [],
+      note: `Only ${peers.length} ${pos}${peers.length === 1 ? '' : 's'} have played ` +
+        `${gate} minutes so far. There is nobody to rank him against yet.` };
+  }
+
+  const mine = pizzaValues(player);
+  const peerValues = peers.map(pizzaValues);
+
+  const rows = params.map((prm) => {
+    const sign = prm.invert ? -1 : 1;
+    const v = sign * (mine[prm.key] || 0);
+    let below = 0, equal = 0;
+    for (const pv of peerValues) {
+      const o = sign * (pv[prm.key] || 0);
+      if (o < v) below += 1; else if (o === v) equal += 1;
+    }
+    // Mid-rank for ties: a parameter where two hundred players all sit on zero
+    // would otherwise put every one of them at the very bottom of the chart.
+    const pct = Math.round(((below + equal / 2) / peerValues.length) * 100);
+    const raw = mine[prm.key] || 0;
+    return {
+      ...prm,
+      value: round(raw, 4),
+      text: prm.pct ? `${Math.round(raw * 100)}%` : raw.toFixed(prm.dp),
+      pct: clamp(pct, 0, 100),
+    };
+  });
+
+  const groups = [];
+  rows.forEach((r) => {
+    const last = groups[groups.length - 1];
+    if (last && last.label === r.g) last.count += 1;
+    else groups.push({ label: r.g, count: 1, from: groups.reduce((s, x) => s + x.count, 0) });
+  });
+
+  return {
+    player, pos, gate, enough: true,
+    peers: peers.length, rows, groups,
+    note: `Percentile against the ${peers.length} ${pos}s with ${gate}+ minutes this season. ` +
+      'Higher is better on every slice — expected goals conceded is flipped so that stays true.',
+  };
+}
+
 /**
  * Every finished match, newest round first, with the clubs resolved.
  *
@@ -1277,6 +1423,176 @@ export function applyFormation(arrangement, name, gwIndex = 0, key = null) {
   const inXI = new Set(xi.map((p) => p.id));
   const bench = orderBench(all.filter((p) => !inXI.has(p.id)).sort((x, y) => value(y) - value(x)));
   return { ok: true, xi: xi.map((p) => p.id), bench: bench.map((p) => p.id), formation: name };
+}
+
+/* ═══════════════════ picking the team for the next deadline ═══════════════ */
+
+/**
+ * The eleven, the bench order and the armbands for the gameweek you can still
+ * act on.
+ *
+ * This is a different question from the planner's. The planner asks who should
+ * be in the squad; this asks which of the squad you already have should play,
+ * which is the question FPL's own Pick Team screen answers and the one that has
+ * to be settled every single week whether or not you transfer anybody.
+ *
+ * Three sources feed it, in order of authority:
+ *
+ *   1. `saved` — what you set here yourself. Yours beats everything.
+ *   2. The picks FPL currently holds, including their captain and vice.
+ *   3. The projection, when neither of the above names anyone eligible.
+ *
+ * Each is labelled in the result rather than blended, because "we chose this"
+ * and "this is what your team already says" are different claims and the screen
+ * has to be able to tell you which one you are looking at.
+ */
+export function pickTeam(ctx, saved = null, opts = {}) {
+  const picks = ctx.squad || [];
+  if (!picks.length) return null;
+  const players = picks.map((s) => s.player).filter(Boolean);
+  if (!players.length) return null;
+
+  const gwIndex = opts.gwIndex || 0;
+  /* Opening on the optimiser's eleven would be the wrong screen.
+   *
+   * This is "pick your team", and the team you have is the starting point — you
+   * came here to change something about it. Handing you a different eleven
+   * before you have touched anything makes the change list read as eleven jobs
+   * you did not ask for, and hides the one you did. So with nothing saved, the
+   * arrangement IS the picks FPL holds; the optimiser is a button. */
+  const fromPicks = () => ({
+    xi: picks.filter((s) => s.slot <= 11).map((s) => s.id),
+    bench: picks.filter((s) => s.slot > 11).sort((a, b) => a.slot - b.slot).map((s) => s.id),
+  });
+  const manual = saved && saved.xi && saved.xi.length ? saved : fromPicks();
+  const arr = arrangeXI(players, gwIndex, manual.xi && manual.xi.length ? manual : null);
+  if (!arr) return null;
+
+  const inXI = new Map(arr.xi.map((p) => [p.id, p]));
+  const value = (p) => (p.proj && p.proj[gwIndex]) || 0;
+  const ranked = arr.xi.slice().sort((a, b) => value(b) - value(a));
+
+  /* An armband only counts if the man is starting.
+   *
+   * FPL lets you set one and then bench him, and the points quietly go to the
+   * vice — so carrying a captain who is not in the eleven would put a crown on
+   * a shirt that cannot score. Anyone benched loses the band and the next
+   * source is asked. */
+  const fromSaved = (k) => (saved && saved[k] != null && inXI.has(saved[k]) ? inXI.get(saved[k]) : null);
+  const fromFpl = (k) => {
+    const pk = picks.find((s) => s[k] && inXI.has(s.id));
+    return pk ? inXI.get(pk.id) : null;
+  };
+
+  let captain = fromSaved('captain'), captainSource = captain ? 'you' : null;
+  if (!captain) { captain = fromFpl('captain'); captainSource = captain ? 'fpl' : null; }
+  if (!captain) { captain = ranked[0] || null; captainSource = captain ? 'auto' : null; }
+
+  let vice = fromSaved('vice'), viceSource = vice ? 'you' : null;
+  if (vice && captain && vice.id === captain.id) { vice = null; viceSource = null; }
+  if (!vice) {
+    const f = fromFpl('vice');
+    if (f && (!captain || f.id !== captain.id)) { vice = f; viceSource = 'fpl'; }
+  }
+  if (!vice) {
+    vice = ranked.find((p) => !captain || p.id !== captain.id) || null;
+    viceSource = vice ? 'auto' : null;
+  }
+
+  const chip = opts.chip || null;
+  const capMult = chip === 'tc' ? 3 : 2;
+  const counted = chip === 'bboost' ? [...arr.xi, ...arr.bench] : arr.xi;
+
+  return {
+    ...arr,
+    gwIndex,
+    gw: ctx.gws[gwIndex],
+    captain, vice, captainSource, viceSource,
+    chip, capMult,
+    // What the eleven projects, with the armband counted once more for the
+    // doubling (three times more under Triple Captain).
+    points: round(counted.reduce((s, p) => s + value(p), 0) +
+      (captain ? value(captain) * (capMult - 1) : 0), 2),
+    benchPoints: round(arr.bench.reduce((s, p) => s + value(p), 0), 2),
+    counted: counted.length,
+  };
+}
+
+/**
+ * Move the armband, or say why it cannot move.
+ *
+ * Giving the band to the current vice swaps the two rather than leaving both on
+ * one player — that is what you meant, and making you clear the vice first
+ * would be a rule invented by the interface rather than by the game.
+ */
+export function setArmband(arrangement, id, role) {
+  if (role !== 'captain' && role !== 'vice') return { ok: false, error: 'Not an armband.' };
+  const inXI = arrangement.xi.find((p) => p.id === id);
+  if (!inXI) {
+    return { ok: false,
+      error: 'Only someone in the starting eleven can wear the armband — bring him on first.' };
+  }
+  const cap = arrangement.captain, vice = arrangement.vice;
+  if (role === 'captain') {
+    if (cap && cap.id === id) return { ok: false, error: 'He already has it.' };
+    // Promoting the vice leaves the vice slot empty, so the old captain takes it.
+    const nextVice = vice && vice.id === id ? cap : vice;
+    return { ok: true, captain: id, vice: nextVice ? nextVice.id : null, swapped: !!(vice && vice.id === id) };
+  }
+  if (vice && vice.id === id) return { ok: false, error: 'He is already the vice.' };
+  const nextCap = cap && cap.id === id ? vice : cap;
+  return { ok: true, captain: nextCap ? nextCap.id : null, vice: id, swapped: !!(cap && cap.id === id) };
+}
+
+/**
+ * What you would have to change on the official site.
+ *
+ * FPL Desk cannot write to FPL — the API is read-only — so the only useful
+ * output of picking a team here is an instruction list for doing it over there.
+ * Reporting it as "promoted / benched / armband / bench order" rather than as
+ * pairwise substitutions is deliberate: that is the shape of the actual screen,
+ * where you tap two players to swap them and the pairing is your choice.
+ */
+export function lineupDiff(picks, arrangement) {
+  const wasStarting = new Set((picks || []).filter((s) => s.slot <= 11).map((s) => s.id));
+  const nowStarting = new Set(arrangement.xi.map((p) => p.id));
+
+  const promoted = arrangement.xi.filter((p) => !wasStarting.has(p.id));
+  const benched = arrangement.bench.filter((p) => wasStarting.has(p.id));
+
+  const oldCap = (picks || []).find((s) => s.captain);
+  const oldVice = (picks || []).find((s) => s.vice);
+  const capChanged = !!arrangement.captain && (!oldCap || oldCap.id !== arrangement.captain.id);
+  const viceChanged = !!arrangement.vice && (!oldVice || oldVice.id !== arrangement.vice.id);
+
+  // Bench order only counts as a change when the same players are on it in a
+  // different sequence. A reordering forced by a substitution is already
+  // reported as the substitution, and saying it twice reads as two jobs.
+  const oldBench = (picks || []).filter((s) => s.slot > 11)
+    .sort((a, b) => a.slot - b.slot).map((s) => s.id);
+  const newBench = arrangement.bench.map((p) => p.id);
+  const sameSet = oldBench.length === newBench.length &&
+    oldBench.every((id) => newBench.includes(id));
+  const reordered = sameSet && oldBench.some((id, i) => newBench[i] !== id);
+
+  /* Counted in JOBS, not in moved players.
+   *
+   * Swapping three players is three things to do on FPL, not six — you tap a
+   * pair at a time. Counting both ends of each swap made the header claim
+   * seven changes over a list of four rows, and a screen that disagrees with
+   * itself about how much work it is asking for is worse than one that does
+   * not say. This is exactly the number of rows the list renders. */
+  const swaps = Math.max(promoted.length, benched.length);
+  const changes = swaps + (capChanged ? 1 : 0) + (viceChanged ? 1 : 0) + (reordered ? 1 : 0);
+
+  return {
+    promoted, benched, reordered,
+    captain: capChanged ? arrangement.captain : null,
+    vice: viceChanged ? arrangement.vice : null,
+    oldCaptain: oldCap ? oldCap.player : null,
+    oldVice: oldVice ? oldVice.player : null,
+    changes, clean: changes === 0,
+  };
 }
 
 /**
