@@ -28,6 +28,8 @@ answer has a **Why?** that unfolds the evidence behind it.
 - **Captaincy** — who the field is captaining and by how much, alongside the differential picks: near the same projection at a fraction of the ownership, with the points swing each one is worth against the popular choice.
 - **What changed** — price moves, availability, form and ownership swings since the previous refresh, with your own players marked.
 - **Your squad** on a pitch in your actual formation, with its own status line saying whether the round is updating, final, or not started, and how fresh the numbers are. Each card carries its gameweek score — the captain's doubled and shown with the working (`👑 24 pts` over `12 pts × 2`) — and **keeps it until the next deadline**, with the next three fixtures colour-coded underneath the whole time. Injury pins and price arrows throughout.
+- **Percentile profile** — a **pizza chart**, the scouting-report form from [mplsoccer's PyPizza](https://mplsoccer.readthedocs.io/en/latest/mplsoccer.py_pizza.html), on every player. Thirteen measures around a circle, each slice as long as his percentile **against the players in his own position** who have played enough to rank. Grouped into attacking, defending and what has actually landed in the points column, with a compare mode that puts a second player's line on the same chart. It refuses to draw when the minutes behind it are too thin to mean anything, and says what it would take.
+- **Pick team** — the section FPL's own Pick Team screen corresponds to, and the one decision you have to make every single week whether or not you transfer anybody. Your fifteen on a pitch for the next deadline, tap two shirts to swap them, **C** and **V** on every shirt for the armbands, bench numbered by the order they come on, formation menu, auto-pick and reset. It opens on the team you already have, so the change list starts empty and everything in it afterwards is something you did. FPL Desk cannot write to FPL, so what it produces is the list of jobs to go and do over there — with a link and a copy button.
 - **Best lineup for the upcoming gameweek** — a button in the Squad header opens the eleven we would field, **drawn as a pitch** with the captain's and vice-captain's armbands already on the shirts, not written out as a list of names. It reads whatever you have staged in the planner, so an eleven shown for a future week already contains that week's transfers — and if you have sold someone without replacing him yet, it says so and picks the best of what is left rather than quietly fielding ten.
 - **Stats** — four tabs of record, kept deliberately apart from the forecast in Targets. The league table with attack and defence rated against the league average and recent form; every player with minutes across nineteen sortable columns (points, minutes, starts, goals, assists, xG, xA, xGI, xGI/90, xGC/90, clean sheets, saves, defensive contributions, bonus, BPS, ICT, ownership, price) filterable by position, club and name; every finished match newest round first; and an audit of the two difficulty scales side by side.
 - **A difficulty scale measured from results** — FPL's 1–5 is set before the season and barely moves, so there is a second one built from what has actually happened: the goals you would expect to concede at that venue, cut into fifths across every remaining fixture. Switch between them in the key under your squad. Whichever is active drives the projections, not just the colours, and **Stats → Difficulty** shows you exactly where the two disagree and scores its own agreement with FPL.
@@ -179,6 +181,35 @@ Each chip is one fixture: the opponent's three-letter code, then the difficulty.
 **UPPER CASE means home, lower case means away.** So `LIV3` is home to Liverpool, `liv3` is away at Liverpool.
 
 The colours run from easiest to hardest — bright green (1), green (2), grey (3), orange (4), red (5). The digit is there so the chips still work if the colours are hard to tell apart; every chip also has a hover label spelling the fixture out in full, including the other scale's rating whenever the two disagree.
+
+## Reading the percentile profile
+
+Open any player and scroll to **Percentile profile**. It is a pizza chart — the form football analytics uses for a scouting one-pager, and the form mplsoccer's `PyPizza` draws.
+
+Each of the thirteen slices is one measure. **The length of the slice is his percentile**, not the raw number: a slice that reaches the rim means nobody in his position does that better. The rings are the 25th, 50th and 75th, and the percentile is printed at the end of every slice, so you never have to judge it by area — which matters, because on any circular chart the area grows faster than the number does. The same thirteen rows sit as a table underneath with the raw values.
+
+**Ranked within his own position, always.** A defender's expected goals measured against forwards would tell you nothing except that he is a defender. The caveat under the chart names the exact pool: *"Percentile against the 147 MIDs with 180+ minutes this season."*
+
+**Higher is always better.** Expected goals conceded is the one measure where low is good, so its ranking is flipped and the table marks it with a ↓. One slice out of thirteen meaning the opposite of the other twelve would be a trap, not a chart.
+
+**It refuses when it cannot answer.** A percentile needs a third of the season's available minutes behind it, floored at 180. One good cameo puts a substitute at the top of every per-90 table in the game. Below the gate there is no chart, just a sentence saying how many minutes he has and how many it would take.
+
+**Compare with** puts a second player on the same chart as a line rather than a second fill, so the two are told apart by shape as well as by colour. Only players who clear the same gate are offered — a menu of names that produce nothing is a menu that lies about what it does.
+
+Groups are separated by a heavier boundary and named around the rim; the chart is ink, like every other chart here, because colour on this page already means fixture difficulty, price direction and availability.
+
+## Pick team, and why it cannot save
+
+This is where you decide who plays. It is deliberately separate from the Planner: the Planner is about **who is in the squad**, this is about **which of them start**, and only the second question has to be answered every week.
+
+It opens on the team FPL currently holds — not on the optimiser's eleven. Handing you a different side before you have touched anything would make the change list read as eleven jobs you never asked for and bury the one you did. **Auto pick** is a button, not the default.
+
+- Tap two shirts to swap them between the eleven and the bench, or to reorder the bench.
+- **C** and **V** under each shirt set the armbands. Giving the band to the current vice swaps the two. An armband cannot be worn from the bench — the controls are there, dimmed, and say why when you press them, because hiding them would hide the rule.
+- The bench is numbered by the order they come on. The reserve keeper is out of that queue and marked **GK**, since he only ever replaces the keeper.
+- **Best lineup** in the Squad header has a **Use this in Pick team** button, so a recommendation is one press from being the thing you are going to do.
+
+**Nothing here reaches FPL.** The API is read-only — it can show you your team, not change it. So what the screen produces is a list of jobs for the official site, phrased the way you will actually do them (*swap Keane off, Ubben on*), with a link straight to Pick Team and a button to copy the list. Your choices are kept in this browser, per manager, and survive a refresh. If a player you had in your eleven leaves the squad, he is dropped and the eleven is completed rather than the pitch going blank.
 
 ## Which difficulty scale is running
 
