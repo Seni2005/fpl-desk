@@ -1,1 +1,1 @@
-{"generatedAt":"2026-10-07T18:07:26.240Z","since":"2026-10-07T09:31:29.085Z","gw":5,"priceRises":[],"priceFalls":[],"statusChanges":[],"formMovers":[],"ownershipMovers":[]}
+{"generatedAt":"2026-10-08T00:34:15.200Z","since":"2026-10-07T18:07:26.226Z","gw":5,"priceRises":[],"priceFalls":[{"id":306,"name":"Greaves","team":"IPS","pos":"DEF","owned":1.1,"from":4,"to":3.9,"delta":-0.1},{"id":621,"name":"McAidoo","team":"MCI","pos":"MID","owned":0.1,"from":4.5,"to":4.4,"delta":-0.1}],"statusChanges":[],"formMovers":[],"ownershipMovers":[]}
